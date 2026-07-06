@@ -1,0 +1,4 @@
+packages:
+  - packages/*
+allowBuilds:
+  sqlite3: true
