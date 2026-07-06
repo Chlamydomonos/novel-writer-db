@@ -5,9 +5,10 @@
  * 凡 `novel.ts` 中**未**标注 `// 该接口不暴露给LLM` 的方法都对应一个 MCP 工具。
  *
  * 设计要点：
- * - 工具入参 schema 用 zod raw shape 直接交给 `McpServer.registerTool(name, { inputSchema: {...} })`，
+ * - 工具入参 schema 用 `z.object({...})` 包裹后交给 `McpServer.registerTool(name, { inputSchema: ... })`，
  *   SDK 会自动转换为 JSON Schema 并在调用前做校验，保证与 HTTP API 端 (`http/schemas.ts`) 一致。
- *   （v2 起 raw shape 是 `@deprecated` 写法但仍受支持；SDK 自动用 `z.object()` 包裹，避免 transform 漂移。）
+ *   主动用 `z.object()` 包裹以消除 v2 SDK 对 raw shape 形式的 `@deprecated` 警告，
+ *   同时避免 SDK 内部 `z.object()` 包裹可能引起的 transform 漂移。
  * - 目标小说完全由请求头 `x-novel-id` 决定；工具 handler 不接收 `novelId` 参数，而是通过
  *   v2 的 `ctx.http?.req?.headers` 调用 `getNovelFromHeaders` 实例化 `Novel` 后再执行
  *   （文档 §请求头与小说绑定）。
@@ -65,11 +66,34 @@ function okResult(payload: unknown): CallToolResult {
 // ===========================================================================
 
 /**
- * 在给定的 `McpServer` 上注册全部 9 个"暴露给 LLM"的工具。
+ * 在给定的 `McpServer` 上注册全部 10 个"暴露给 LLM"的工具。
  *
  * @param server 待注册工具的 MCP server（由 `buildMcpServer` 创建）
  */
 export function registerNovelTools(server: McpServer): void {
+    // -----------------------------------------------------------------------
+    // get_info —— 读取小说基本信息（name + info getter）
+    // 该能力由 Novel 类的 getter 而非 async 方法提供，因此在工具层补全。
+    // -----------------------------------------------------------------------
+    server.registerTool(
+        'get_info',
+        {
+            description:
+                '读取当前小说的基本信息，返回 `{ name, info }`：' +
+                '`name` 为小说名称，`info` 为小说的整段基本信息文本。' +
+                '调用需在请求头携带目标小说 ID。',
+            inputSchema: z.object({}),
+        },
+        async (_args, ctx) => {
+            try {
+                const novel = await getNovelFromHeaders(ctx.http?.req?.headers);
+                return okResult({ name: novel.name, info: novel.info });
+            } catch (err) {
+                return errorResult(err);
+            }
+        },
+    );
+
     // -----------------------------------------------------------------------
     // write_info —— 整体覆盖小说的 info 字段
     // 成功返回 `{ name, info }`。
@@ -80,9 +104,9 @@ export function registerNovelTools(server: McpServer): void {
             description:
                 '整体覆盖小说的基本信息（`info` 字段，一段长文本）。' +
                 '调用需在请求头携带目标小说 ID。成功返回最新 `{ name, info }`。',
-            inputSchema: {
+            inputSchema: z.object({
                 info: z.string().describe('新的小说基本信息全文'),
-            },
+            }),
         },
         async ({ info }, ctx) => {
             try {
@@ -105,11 +129,11 @@ export function registerNovelTools(server: McpServer): void {
             description:
                 '对小说基本信息 `info` 字段做正则替换。' +
                 '若替换前后字符串相同，返回 EditFailError（可用于判断是否需要调整正则后重试）。',
-            inputSchema: {
+            inputSchema: z.object({
                 regex: z.string().describe('正则表达式源'),
                 replace: z.string().describe('替换字符串'),
                 flags: z.string().optional().describe('可选正则标志，如 `g`/`gi`'),
-            },
+            }),
         },
         async ({ regex, replace, flags }, ctx) => {
             try {
@@ -131,12 +155,13 @@ export function registerNovelTools(server: McpServer): void {
             description:
                 '列出指定目录下的内容，返回多行文本，每行格式为 `<emoji> <name>`：' +
                 '🗂️ 表示非空目录、📁 表示空目录、📂 表示深度未知目录、📄 表示 markdown 文档。' +
+                '目录层级通过缩进表示：每深一层缩进增加 2 个空格（与父级对齐即同一层级）。' +
                 '`path` 必须为绝对路径（如 `/设定`）；`recursive=true` 时向下递归最多 5 层。' +
                 '注意：返回的文本不包含文档正文。',
-            inputSchema: {
+            inputSchema: z.object({
                 path: PathField,
                 recursive: z.boolean().optional().describe('是否递归子目录，默认 false；递归最大深度 5'),
-            },
+            }),
         },
         async ({ path, recursive }, ctx) => {
             try {
@@ -158,9 +183,9 @@ export function registerNovelTools(server: McpServer): void {
             description:
                 '批量读取 markdown 文档正文。`paths` 为绝对路径数组，每个路径必须以 `.md` 结尾，至少 1 个。' +
                 '返回 `{ path, text }[]`。',
-            inputSchema: {
+            inputSchema: z.object({
                 paths: z.array(PathField).min(1).describe('绝对文件路径数组，每个必须以 `.md` 结尾'),
-            },
+            }),
         },
         async ({ paths }, ctx) => {
             try {
@@ -182,11 +207,11 @@ export function registerNovelTools(server: McpServer): void {
             description:
                 '语义检索：在指定的根目录（`设定`/`大纲`/`正文`）内按文本相似度查询文档。' +
                 '`limit` 取值范围 1..20。返回 `{ path, text }[]`。',
-            inputSchema: {
+            inputSchema: z.object({
                 rootCategory: z.enum(ROOT_CATEGORY_NAMES).describe('检索根目录'),
                 texts: z.array(z.string()).min(1).describe('查询文本数组，至少 1 个'),
                 limit: z.number().int().min(1).max(20).describe('返回结果数量，1..20'),
-            },
+            }),
         },
         async ({ rootCategory, texts, limit }, ctx) => {
             try {
@@ -207,12 +232,13 @@ export function registerNovelTools(server: McpServer): void {
         {
             description:
                 '整体覆盖或创建一个 `.md` 文档；中间目录会自动创建。' +
-                '`path` 为绝对路径，至少两级（如 `/设定/世界/人物.md`）；**禁止写入根目录本身**（如 `/设定`）。' +
+                '`path` 为绝对路径，必须以 `.md` 结尾，且路径项数不小于 2（如 `/设定/人物.md`）——' +
+                '该限制用于阻止形如 `/xxx.md` 的访问；对形如 `/设定/xxx.md` 的访问没有限制。' +
                 '成功返回 `{ ok: true }`。',
-            inputSchema: {
+            inputSchema: z.object({
                 path: PathField.describe('绝对文件路径，必须以 `.md` 结尾'),
                 text: z.string().describe('完整正文'),
-            },
+            }),
         },
         async ({ path, text }, ctx) => {
             try {
@@ -235,12 +261,12 @@ export function registerNovelTools(server: McpServer): void {
                 '正则替换编辑指定文档：读取 → 替换 → 整体写回。' +
                 '若替换前后无变化，返回 EditFailError（isError），可用于判断是否需调整正则。' +
                 '成功返回 `{ ok: true }`。',
-            inputSchema: {
+            inputSchema: z.object({
                 path: PathField.describe('绝对文件路径，必须以 `.md` 结尾'),
                 regex: z.string().describe('正则表达式源'),
                 replace: z.string().describe('替换文本'),
                 flags: z.string().optional().describe('可选正则标志'),
-            },
+            }),
         },
         async ({ path, regex, replace, flags }, ctx) => {
             try {
@@ -260,9 +286,9 @@ export function registerNovelTools(server: McpServer): void {
         'delete_document',
         {
             description: '删除一个 `.md` 文档。`path` 为绝对文件路径。成功返回 `{ ok: true }`。',
-            inputSchema: {
+            inputSchema: z.object({
                 path: PathField.describe('绝对文件路径，必须以 `.md` 结尾'),
-            },
+            }),
         },
         async ({ path }, ctx) => {
             try {
@@ -285,9 +311,9 @@ export function registerNovelTools(server: McpServer): void {
                 '删除一个**非根**目录及其下全部内容（递归）。' +
                 '`path` 为绝对目录路径；若为根目录（`/设定`、`/大纲`、`/正文`）则返回 InvalidPathError。' +
                 '成功返回 `{ ok: true }`。',
-            inputSchema: {
+            inputSchema: z.object({
                 path: PathField.describe('绝对目录路径，不含 `.md` 后缀'),
-            },
+            }),
         },
         async ({ path }, ctx) => {
             try {
