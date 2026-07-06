@@ -62,6 +62,7 @@ services:
       # 后端无需对外暴露 chroma/embedding 端口（仅服务内通信）
       NODE_ENV: production
       PORT: '3000'
+      HOST: '0.0.0.0'   # 容器化时必须绑到所有网卡，否则 nginx/前端无法访问
     ports:
       - '3000:3000'
     volumes:
@@ -165,17 +166,20 @@ RUN apk add --no-cache python3 make g++ sqlite-dev
 
 ## 环境变量约定
 
-后端建议支持以下可配置项（在 `main.ts` 中读取），未设置则采用默认：
+`main.ts` 当前已读取以下变量（其余 MCP 相关项待 MCP 阶段实现）：
 
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `PORT` | `3000` | HTTP / MCP 共用监听端口 |
-| `MCP_PATH` | `/mcp` | MCP endpoint 路径 |
-| `MCP_NOVEL_ID_HEADER` | `X-Novel-Id` | 目标小说请求头名 |
-| `CHROMA_HOST` / `CHROMA_PORT` | `chroma` / `8000` | 向量库（容器内写死，可预留） |
-| `EMBEDDING_BASE` | `http://embedding:8000/v1` | 嵌入服务 |
+| 变量 | 默认 | 说明 | 状态 |
+| --- | --- | --- | --- |
+| `PORT` | `3000` | HTTP / MCP 共用监听端口 | 已实现 |
+| `HOST` | `127.0.0.1` | 监听地址；容器化部署时需设为 `0.0.0.0` | 已实现 |
+| `MCP_PATH` | `/mcp` | MCP endpoint 路径 | 待实现 |
+| `MCP_NOVEL_ID_HEADER` | `X-Novel-Id` | 目标小说请求头名 | 待实现 |
+| `CHROMA_HOST` / `CHROMA_PORT` | `chroma` / `8000` | 向量库（容器内写死，可预留） | 待实现 |
+| `EMBEDDING_BASE` | `http://embedding:8000/v1` | 嵌入服务 | 待实现 |
 
-当前 `db/embedding.ts` 与 `db/chroma.ts` 是硬编码的，**部署文档建议在落地 PR 中把这两处改为读环境变量**，便于本地裸跑/迁移。
+> 容器化部署时务必把 `HOST` 设为 `0.0.0.0`，否则外部（包括 compose 同网络的 nginx）无法访问 `:3000`。
+>
+> 另外 `db/embedding.ts` 与 `db/chroma.ts` 当前仍是硬编码的服务名/地址；**部署文档建议在落地 PR 中把这两处改为读环境变量**，便于本地裸跑/迁移。
 
 ## 启动顺序与健康检查
 

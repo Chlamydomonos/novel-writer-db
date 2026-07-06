@@ -17,7 +17,16 @@ novel-writer-db/                       # pnpm monorepo 根
 │   │
 │   ├── backend/                       # 唯一后端工程：HTTP API + MCP 在同一进程
 │   │   └── src/
-│   │       ├── main.ts                # 当前仅占位（// TODO）
+│   │       ├── main.ts                # 启动 Fastify HTTP 服务（读取 PORT/HOST）
+│   │       ├── http/                  # ★ HTTP API 层（基于 Fastify）
+│   │       │   ├── server.ts          #   装配 app、注册路由、全局错误处理
+│   │       │   ├── errors.ts          #   业务异常 → HTTP 状态码映射
+│   │       │   ├── schemas.ts         #   Zod 运行时校验 schema
+│   │       │   ├── types.d.ts         #   FastifyRequest.novel 字段扩展
+│   │       │   └── routes/
+│   │       │       ├── novels.ts      #   /api/novels* + 共享 loadNovelOrError hook
+│   │       │       ├── documents.ts   #   read/write/edit/search/deleteDocument
+│   │       │       └── categories.ts  #   list/tree/deleteCategory
 │   │       └── lib/
 │   │           ├── novel.ts           # ★ 已完成：核心业务逻辑（依赖 shared）
 │   │           ├── errors.ts          # 已完成：业务异常
@@ -169,10 +178,11 @@ HTTP/MCP 入口
 
 [→ 详细的接口定义见 HTTP API 文档](./http-api.md)
 
-- 入口应当统一处理：
-  1. **错误映射**：把 `lib/errors.ts` 中的业务异常映射为合适的 HTTP 状态码
-  2. **小说实例构造**：从 URL 参数（前端）或请求头（MCP）解析小说 ID，调用 `Novel.byID(id)`
-  3. **JSON 序列化**：统一驼峰字段
+HTTP API 已基于 **Fastify** 落地（`packages/backend/src/http/`），三层职责清晰：
+
+1. **错误映射**：`http/errors.ts` 的 `mapError()` 统一把 `lib/errors.ts` 业务异常映射为状态码，并在 `http/server.ts` 通过 `app.setErrorHandler` 兜底 handler 内未捕获的异常（Fastify 自身 schema 校验失败另回 `400`）。
+2. **小说实例构造**：所有 `/:novelId` 路由共用 `loadNovelOrError` 预处理器，从 URL 参数解析后调用 `Novel.byID(id)`，并把实例挂到 `request.novel`；不存在时由 `byID` 抛 `NotExistError → 404`。
+3. **JSON 序列化**：成功 200 返回 JSON，仅 `GET /list` 返回 `text/plain; charset=utf-8` 缩进文本，`PUT/DELETE` 类返回 `204 No Content`。
 
 ## 请求生命周期（MCP）
 

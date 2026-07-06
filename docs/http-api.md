@@ -1,6 +1,6 @@
 # HTTP API
 
-本文档定义后端需要为**前端**与 **MCP 服务器**共同依赖的 REST 接口。这是后续两个子系统的底座。
+本文档定义后端为**前端**与 **MCP 服务器**共同依赖的 REST 接口——它是后续两个子系统的底座。**HTTP 层已基于 Fastify v5 落地**（实作指引见文末），本章同时作为该层的契约说明。
 
 ## 设计原则
 
@@ -241,57 +241,68 @@ DELETE /api/novels/:novelId/categories?path=/设定/废弃
 
 响应：`204 No Content`。**禁止删除根目录**。
 
-## 实作指引
+## 实作指引（已落地）
 
-### 文件与目录建议
+HTTP API 已基于 **Fastify v5** 实现，文件布局如下（与 [技术架构](./architecture.md#模块划分) 一致）：
 
-```
+```text
 packages/backend/src/
-├── main.ts                       # 启动 HTTP server（如使用 Fastify/Express）
+├── main.ts                       # 启动 Fastify server：读取 PORT/HOST 后 listen
 ├── http/
-│   ├── server.ts                 # 路由注册、错误中间件
-│   ├── routes/
-│   │   ├── novels.ts             # /api/novels*
-│   │   ├── documents.ts          # read/write/edit/search/deleteDocument
-│   │   └── categories.ts         # list/tree/deleteCategory
-│   └── schemas.ts                # Zod schema（运行时校验），类型从 @novel-writer/shared 引入
+│   ├── server.ts                 #   buildApp()：注册路由 + setErrorHandler
+│   ├── errors.ts                 #   mapError / sendError：业务异常 → 状态码 + 错误体
+│   ├── schemas.ts                #   Zod 运行时校验 schema
+│   ├── types.d.ts                #   FastifyRequest.novel 字段扩展声明
+│   └── routes/
+│       ├── novels.ts             # /api/novels* + 共享 loadNovelOrError 预处理
+│       ├── documents.ts          # read/write/edit/search/deleteDocument
+│       └── categories.ts         # list/tree/deleteCategory
 └── lib/                          # 既有业务层
 ```
 
-> DTO 类型已统一收敛至 `@novel-writer/shared`（`RootCategoryName`、`DocumentRef`、`SearchRequest` 等）；
-> backend 内部不再重复声明接口类型，仅在 `http/schemas.ts` 用 Zod 描述运行时校验。
-> 二者通过 `z.infer<typeof XxxZod>` 与 shared 的同名接口做合同约束，避免漂移。
+> 单一类型来源：所有请求/响应的静态类型在 `@novel-writer/shared/dto.ts` 定义；
+> 后端 `http/schemas.ts` 只用 Zod 描述运行时校验，二者通过 `z.infer<typeof XxxZod>` 与同名 DTO 接口在 handler 形参/返回类型处彼此约束，防止漂移。
+> （受项目 `exactOptionalPropertyTypes` 影响，schema 不再使用 `satisfies z.ZodType<DTO>`，改为在路由处显式标注类型。）
 
-### 错误映射中间件（建议）
+### 错误映射：`setErrorHandler`
 
-```ts
-function mapError(err: unknown) {
-    if (err instanceof InvalidPathError || err instanceof OutOfBoundsError) return 400;
-    if (err instanceof NotExistError) return 404;
-    if (err instanceof ExistError)    return 409;
-    if (err instanceof EditFailError) return 422;
-    return 500;
-}
-```
-
-### 中间件：解析小说实例
+全局兜底放在 `http/server.ts`，封装于 `http/errors.ts`：
 
 ```ts
-async function loadNovel(req, res, next) {
-    const id = Number(req.params.novelId);
-    try {
-        req.novel = await Novel.byID(id);   // 不存在直接抛 NotExistError → 404
-        next();
-    } catch (e) { next(e); }
-}
+app.setErrorHandler((err, _request, reply) => {
+    if (err instanceof Error && 'validation' in err) {
+        return reply.code(400).send({ error: { type: 'InvalidPathError', message: err.message } });
+    }
+    return sendError(reply, err); // 内部按 mapError 选 400/404/409/422/500
+});
 ```
 
-### HTTP 框架选型建议
+`mapError` 返回 `{ status, body: ApiErrorBody }`，状态码映射见 [错误响应](#错误响应)。
 
-- **Fastify**：性能好，schema 友好，与 Zod 适配。
-- 若追求最少依赖可用 Node 原生 `http` + 手写路由（本项目体量允许）。
+### 预处理器：解析小说实例
 
-> 已安装 `zod ^4`，可用来定义所有请求/响应 schema 以复用至 MCP；其静态类型应引用 `@novel-writer/shared` 的同名接口。
+所有 `:novelId` 路由复用 `loadNovelOrError`（`routes/novels.ts` 导出）：
+
+```ts
+const withNovel = { preHandler: loadNovelOrError };
+
+app.get('/api/novels/:novelId', { ...withNovel }, (request) => detailOf(request.novel!));
+```
+
+其内部 `Number(params.novelId)` 后调用 `Novel.byID(id)`，把实例挂到 `request.novel`；非正整数 → `400 InvalidPathError`，小说不存在 → `404 NotExistError`，均直接 `reply.send` 终止。
+
+### 校验流程
+
+每个 handler 入口先用 `schema.safeParse(request.body)`，失败时回送 `400 InvalidPathError`（错误体复用同一外壳，`message` 为 Zod 错误树）。业务层的语义校验（如 `limit` 上下限）则抛 `OutOfBoundsError` 由全局处理器接管。
+
+### 启动方式
+
+```bash
+pnpm --filter backend build
+node packages/backend/dist/main.js   # 默认 127.0.0.1:3000；PORT / HOST 可由环境变量覆盖
+```
+
+可立即 `curl http://127.0.0.1:3000/api/novels` 验证。
 
 ## 预告
 

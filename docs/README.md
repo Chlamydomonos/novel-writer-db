@@ -40,10 +40,12 @@
 
 后续工作分为四个阶段，对应文档如下：
 
-1. **HTTP API 层** —— 把 `Novel` 类的能力包装成 REST 接口，作为前端与 MCP 共用的底座。详见 [HTTP API](./http-api.md)。
-2. **MCP 服务器** —— 在 HTTP API 之上，暴露受限工具集给 LLM。详见 [MCP 服务器](./mcp-server.md)。
+1. **HTTP API 层** —— 把 `Novel` 类的能力包装成 REST 接口，作为前端与 MCP 共用的底座。**已基本落地**（基于 Fastify，见 [HTTP API](./http-api.md)）。
+2. **MCP 服务器** —— 在 HTTP 入口之外，暴露受限工具集给 LLM。详见 [MCP 服务器](./mcp-server.md)。
 3. **Vue 前端** —— 通过 HTTP API 完成可视化全功能管理。详见 [前端](./frontend.md)。
 4. **容器化与部署** —— 把后端/前端一并纳入 `docker-compose.yml`。详见 [部署](./deployment.md)。
+
+> 前端与 MCP 容器化需要 `packages/frontend`，目前尚未初始化；MCP endpoint 的监听路径由 `main.ts` 中追加注册。
 
 ## 关键设计决策
 
