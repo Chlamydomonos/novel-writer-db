@@ -9,7 +9,9 @@
     },
     "dependencies": {
         "@chroma-core/openai": "^0.1.10",
-        "@modelcontextprotocol/sdk": "^1.29.0",
+        "@modelcontextprotocol/fastify": "2.0.0-beta.2",
+        "@modelcontextprotocol/node": "2.0.0-beta.2",
+        "@modelcontextprotocol/server": "2.0.0-beta.2",
         "@novel-writer/shared": "workspace:*",
         "@sequelize/core": "7.0.0-alpha.48",
         "@sequelize/sqlite3": "7.0.0-alpha.48",

@@ -19,7 +19,7 @@
 - **关系数据库**：SQLite（经 Sequelize 7 alpha 持久化元数据）
 - **向量数据库**：ChromaDB
 - **嵌入模型**：Qwen3-Embedding-0.6B（gguf，由 llama.cpp 提供 OpenAI 兼容接口，GPU 加速）
-- **MCP**：`@modelcontextprotocol/sdk` + `zod`
+- **MCP**：`@modelcontextprotocol/server` + `@modelcontextprotocol/node` + `@modelcontextprotocol/fastify`（v2 beta）+ `zod`
 - **前端**：Vue 3（计划中）
 
 > 详见 [技术架构](./architecture.md)。
