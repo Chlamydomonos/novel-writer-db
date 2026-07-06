@@ -7,30 +7,54 @@
 ```
 novel-writer-db/                       # pnpm monorepo 根
 ├── docker-compose.yml                 # 编排 ChromaDB + embedding GPU 服务
+├── pnpm-workspace.yaml                # 声明 packages/* 全部为 workspace 包
 ├── packages/
+│   ├── shared/                        # ★ 前后端共享类型与常量
+│   │   ├── package.json               #   name: @novel-writer/shared
+│   │   └── src/
+│   │       ├── index.ts               #   统一导出
+│   │       └── dto.ts                 #   RootCategoryName、TreeNode、请求/响应 DTO
+│   │
 │   ├── backend/                       # 唯一后端工程：HTTP API + MCP 在同一进程
 │   │   └── src/
 │   │       ├── main.ts                # 当前仅占位（// TODO）
 │   │       └── lib/
-│   │           ├── novel.ts           # ★ 已完成：核心业务逻辑
+│   │           ├── novel.ts           # ★ 已完成：核心业务逻辑（依赖 shared）
 │   │           ├── errors.ts          # 已完成：业务异常
 │   │           └── db/                # 已完成：Sequelize + Chroma 客户端
 │   │               ├── sequelize.ts
 │   │               ├── chroma.ts
 │   │               ├── embedding.ts
-│ │           └── models/
-│ │           ├── category.ts
-│ │           ├── document.ts
-│ │           └── novel.ts
+│   │               └── models/
+│   │                   ├── category.ts
+│   │                   ├── document.ts
+│   │                   └── novel.ts
 │   │
-│   └── frontend/                      # 计划中：Vue 3 SPA
+│   └── frontend/                      # 计划中：Vue 3 SPA（引用 shared 类型）
 │
 └── docs/                              # 本文档目录
 ```
 
-## 分层架构
+### 包依赖关系
 
 ```
+        ┌─────────────────────────────┐
+        │  @novel-writer/shared        │  纯类型与常量，无运行时依赖
+        │  （dto.ts / index.ts）        │
+        └───────┬───────────────┬──────┘
+                │ workspace:*   │ workspace:*
+                ▼               ▼
+        ┌──────────────┐  ┌──────────────┐
+        │   backend     │  │   frontend    │
+        │ （HTTP + MCP）│  │  （Vue SPA）    │
+        └──────────────┘  └──────────────┘
+```
+
+> `@novel-writer/shared` 通过 `exports` 字段暴露 `dist`，并由 `composite: true` 的 `tsconfig` 提供跨包类型校验；任意一方修改字段会立即在另一方 `tsc --noEmit` 时暴露漂移。
+
+## 分层架构
+
+````
             ┌────────────────────────────┐
             │  LLM / Agent（外部调用方）    │
             └────────────────────────────┘
@@ -66,7 +90,22 @@ novel-writer-db/                       # pnpm monorepo 根
         │ (向量库)       │         │ llama.cpp server  │       │
         │               │         │ (Qwen3-Embedding) │       │
         └──────────────┘         └──────────────────┘       │
-```
+
+↕︎ 类型与常量在前后端之间共享
+┌────────────────────────────────────────────────────────┐
+│ packages/shared (@novel-writer/shared)                  │
+│   RootCategoryName / ROOT_CATEGORY_NAMES / TreeNode     │
+│   各 HTTP 端点的 Request/Response DTO / ApiErrorBody    │
+└────────────────────────────────────────────────────────┘
+        ▲                                   ▲
+        │ workspace:*                       │ workspace:*
+┌──────────────┐                  ┌──────────────────┐
+│   backend     │                  │     frontend      │
+│ (含 lib/novel)│                  │   （Vue 3 SPA）   │
+└──────────────┘                  └──────────────────┘
+````
+
+> 后端 `lib/novel.ts` 已从 `@novel-writer/shared` 引入并再导出 `RootCategoryName`/`ROOT_CATEGORY_NAMES`，使既有 `import { RootCategoryName } from '../lib/novel.js'` 的调用方继续工作，同时保证类型单一来源。
 
 ## 进程模型
 
@@ -149,6 +188,7 @@ HTTP/MCP 入口
 | --- | --- |
 | 语言/类型 | TS `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` |
 | 模块系统 | 原生 ESM（`"type": "module"`），import 必须带 `.js` 扩展名 |
+| 类型共享 | 前后端共用以 `workspace:*` 协议依赖的 `@novel-writer/shared`，单一类型来源 |
 | 部署形态 | 仅支持容器化（外部依赖通过服务名访问） |
 | SQLite 模式 | WAL + `synchronous=NORMAL` + `busy_timeout=5000`（已设置） |
 | SQLite 连接池 | `max=min=1`，所有写入串行 |

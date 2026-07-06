@@ -1,0 +1,30 @@
+{
+    "name": "@novel-writer/shared",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "novel-writer-db 前后端共享 DTO 类型与常量",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        },
+        "./dto": {
+            "types": "./dist/dto.d.ts",
+            "import": "./dist/dto.js"
+        }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "rimraf ./dist && tsc",
+        "typecheck": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "rimraf": "^6.1.3",
+        "typescript": "^6.0.3"
+    }
+}

@@ -9,6 +9,7 @@
 - **无认证**：本系统为本地辅助工具，不在文档中处理认证；如需暴露公网应另加反向代理。
 - **正文传输**：以 `text/plain` 传输 markdown 正文，元数据以 `application/json`。
 - **覆盖所有能力**：HTTP API 覆盖 `Novel` 类的全部公开方法（含 LLM 不可见的 `byID`/`listAll`/`create`/`rename`/`destroy`）。
+- **类型单一来源**：所有请求/响应的 TypeScript 类型定义在 `@novel-writer/shared` 的 `dto.ts`，后端在 `http/` 层只写 Zod schema（运行时校验），不再重复声明同名接口。
 
 ## 路由总览
 
@@ -253,9 +254,13 @@ packages/backend/src/
 │   │   ├── novels.ts             # /api/novels*
 │   │   ├── documents.ts          # read/write/edit/search/deleteDocument
 │   │   └── categories.ts         # list/tree/deleteCategory
-│   └── dto.ts                    # 请求/响应 TypeScript 类型 + Zod schema
+│   └── schemas.ts                # Zod schema（运行时校验），类型从 @novel-writer/shared 引入
 └── lib/                          # 既有业务层
 ```
+
+> DTO 类型已统一收敛至 `@novel-writer/shared`（`RootCategoryName`、`DocumentRef`、`SearchRequest` 等）；
+> backend 内部不再重复声明接口类型，仅在 `http/schemas.ts` 用 Zod 描述运行时校验。
+> 二者通过 `z.infer<typeof XxxZod>` 与 shared 的同名接口做合同约束，避免漂移。
 
 ### 错误映射中间件（建议）
 
@@ -286,7 +291,7 @@ async function loadNovel(req, res, next) {
 - **Fastify**：性能好，schema 友好，与 Zod 适配。
 - 若追求最少依赖可用 Node 原生 `http` + 手写路由（本项目体量允许）。
 
-> 已安装 `zod ^4`，可用来定义所有请求/响应 schema 以复用至 MCP。
+> 已安装 `zod ^4`，可用来定义所有请求/响应 schema 以复用至 MCP；其静态类型应引用 `@novel-writer/shared` 的同名接口。
 
 ## 预告
 

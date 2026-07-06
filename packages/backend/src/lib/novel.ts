@@ -1,4 +1,5 @@
 import { Op } from '@sequelize/core';
+import { ROOT_CATEGORY_NAMES, type RootCategoryName } from '@novel-writer/shared';
 import { getChroma } from './db/chroma.js';
 import { embeddingFunction } from './db/embedding.js';
 import { Category } from './db/models/category.js';
@@ -7,9 +8,9 @@ import { Novel as NovelModel } from './db/models/novel.js';
 import { getDB } from './db/sequelize.js';
 import { EditFailError, ExistError, InvalidPathError, NotExistError, OutOfBoundsError } from './errors.js';
 
-export type RootCategoryName = '设定' | '大纲' | '正文';
-
-export const ROOT_CATEGORY_NAMES = ['设定', '大纲', '正文'] as RootCategoryName[];
+// 从 @novel-writer/shared 再导出，便于现有 `import { RootCategoryName } from '../lib/novel.js'` 调用方继续工作。
+export type { RootCategoryName } from '@novel-writer/shared';
+export { ROOT_CATEGORY_NAMES };
 
 type SearchResult = {
     icon: string;
