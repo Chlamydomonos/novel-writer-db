@@ -1,6 +1,16 @@
 {
     "docker.lsp.experimental.scout.criticalHighVulnerabilities": false,
-    "cSpell.words": ["chromadb", "ggml", "gguf", "healthcheck", "modelcontextprotocol", "Qwen", "Streamable"],
+    "cSpell.words": [
+        "bytemd",
+        "chromadb",
+        "ggml",
+        "gguf",
+        "healthcheck",
+        "modelcontextprotocol",
+        "Popconfirm",
+        "Qwen",
+        "Streamable"
+    ],
     "explorer.fileNesting.enabled": true,
     "explorer.fileNesting.patterns": {
         "tsconfig.json": "tsconfig.*.json, env.d.ts, typed-router.d.ts",

@@ -68,9 +68,9 @@ export class Novel {
         });
 
         const chroma = await getChroma();
-        await chroma.createCollection({ name: `category#${settings.id}`, embeddingFunction });
-        await chroma.createCollection({ name: `category#${outlines.id}`, embeddingFunction });
-        await chroma.createCollection({ name: `category#${texts.id}`, embeddingFunction });
+        await chroma.createCollection({ name: `category_${settings.id}`, embeddingFunction });
+        await chroma.createCollection({ name: `category_${outlines.id}`, embeddingFunction });
+        await chroma.createCollection({ name: `category_${texts.id}`, embeddingFunction });
 
         return new Novel(model.id, model.name, '');
     }
@@ -169,7 +169,7 @@ export class Novel {
         const chroma = await getChroma();
         for (const rootCategoryId of rootCategoryIds) {
             try {
-                await chroma.deleteCollection({ name: `category#${rootCategoryId}` });
+                await chroma.deleteCollection({ name: `category_${rootCategoryId}` });
             } catch {
                 // collection 可能不存在或已被删除，忽略以便主流程完成。
             }
@@ -274,7 +274,7 @@ export class Novel {
             if (!document) {
                 throw new NotExistError(`文档\`${parsed.categoryPath}/${parsed.name}不存在\``);
             }
-            const collection = await chroma.getCollection({ name: `category#${rootId}`, embeddingFunction });
+            const collection = await chroma.getCollection({ name: `category_${rootId}`, embeddingFunction });
             const text = (await collection.get({ ids: [document.id.toString()] })).documents[0];
             if (!text) {
                 throw new NotExistError(`文档\`${parsed.categoryPath}/${parsed.name}不存在\``);
@@ -331,7 +331,7 @@ export class Novel {
         }
 
         const chroma = await getChroma();
-        const collection = await chroma.getCollection({ name: `category#${categoryModel.id}`, embeddingFunction });
+        const collection = await chroma.getCollection({ name: `category_${categoryModel.id}`, embeddingFunction });
         const searchResult = await collection.query({ queryTexts: texts, nResults: limit });
         const result: { path: string; text: string }[] = [];
         const idSet = new Set<number>();
@@ -429,7 +429,7 @@ export class Novel {
         });
 
         const chroma = await getChroma();
-        const collection = await chroma.getCollection({ name: `category#${rootCategoryId}`, embeddingFunction });
+        const collection = await chroma.getCollection({ name: `category_${rootCategoryId}`, embeddingFunction });
         await collection.upsert({ ids: [documentId.toString()], documents: [text] });
     }
 
@@ -480,7 +480,7 @@ export class Novel {
         });
 
         const chroma = await getChroma();
-        const collection = await chroma.getCollection({ name: `category#${rootId}`, embeddingFunction });
+        const collection = await chroma.getCollection({ name: `category_${rootId}`, embeddingFunction });
         await collection.delete({ ids: [documentId.toString()] });
     }
 
@@ -510,7 +510,7 @@ export class Novel {
 
         const db = await getDB();
         const chroma = await getChroma();
-        const collection = await chroma.getCollection({ name: `category#${rootId}`, embeddingFunction });
+        const collection = await chroma.getCollection({ name: `category_${rootId}`, embeddingFunction });
 
         await db.transaction(async (transaction) => {
             await Document.destroy({ where: { id: { [Op.in]: documentIds } }, transaction });
