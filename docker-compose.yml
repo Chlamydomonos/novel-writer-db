@@ -7,8 +7,6 @@ services:
       - ./local/chromaData:/data
     expose:
       - 8000
-    ports:
-      - 8000:8000
     networks:
       - main
     healthcheck:
@@ -50,6 +48,30 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  backend:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    container_name: backend
+    depends_on:
+      chroma:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # nginx 是另一个容器，backend 必须绑到 0.0.0.0 才能被反代访问
+      HOST: "0.0.0.0"
+    expose:
+      - "3000"
+    volumes:
+      # SQLite 持久化：db/sequelize.ts 中 storage: '/data/db.sqlite3'
+      - ./local/backendData:/data
+    networks:
+      - main
 
 networks:
   main:

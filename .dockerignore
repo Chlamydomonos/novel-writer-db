@@ -1,0 +1,27 @@
+# 依赖与构建产物（容器内重新生成）
+**/node_modules/
+**/dist/
+
+# 本地数据卷（巨大的 .gguf 模型、SQLite、Chroma 数据），绝不进入构建上下文
+local/
+
+# 版本控制与 CI
+.git/
+.gitignore
+.github/
+
+# 编辑器与系统文件
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 日志
+*.log
+npm-debug.log*
+
+# 文档（不影响构建）
+docs/
+
+# 已存在的容器配置自身无需进上下文
+docker-compose.yml
