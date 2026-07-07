@@ -55,6 +55,10 @@ export const listQuerySchema = z.object({
         }),
 });
 
+export const createCategorySchema = z.object({
+    path: absolutePath,
+});
+
 // ===========================================================================
 // Documents
 // ===========================================================================

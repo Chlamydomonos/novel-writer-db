@@ -116,6 +116,12 @@ export type ListResponse = TreeNode[];
  * 仅作为别名以便区分接口风格；实际类型为 `string`。 */
 export type ListTextResponse = string;
 
+/** 创建空目录请求体，对应 `POST /api/novels/:id/categories`。 */
+export interface CreateCategoryRequest {
+    /** 要创建的目录绝对路径，如 `/设定/世界观`。 */
+    path: string;
+}
+
 // ===========================================================================
 // 文档读写相关 DTO
 // ===========================================================================

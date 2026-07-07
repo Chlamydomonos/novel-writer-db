@@ -13,21 +13,22 @@
 
 ## 路由总览
 
-| 方法 | 路径 | 对应 `Novel` 方法 | 说明 |
-| --- | --- | --- | --- |
-| `GET`    | `/api/novels` | `listAll` | 列出全部小说 |
-| `POST`   | `/api/novels` | `create` | 创建小说 |
-| `GET`    | `/api/novels/:novelId` | `byID` | 获取小说基本信息 |
-| `PATCH`  | `/api/novels/:novelId` | `rename` / `writeInfo` / `editInfo` | 修改小说元信息 |
-| `DELETE` | `/api/novels/:novelId` | `destroy` | 删除小说 |
-| `GET`    | `/api/novels/:novelId/list` | `list` | 列出某路径下的内容 |
-| `GET`    | `/api/novels/:novelId/tree` | `listAsJson` | 以 JSON 形式列目录（仅一层） |
-| `POST`   | `/api/novels/:novelId/read` | `read` | 批量读取文档 |
-| `POST`   | `/api/novels/:novelId/write` | `write` | 写入（覆盖）文档 |
-| `POST`   | `/api/novels/:novelId/edit` | `edit` | 正则替换编辑文档 |
-| `POST`   | `/api/novels/:novelId/search` | `search` | 语义检索 |
-| `DELETE` | `/api/novels/:novelId/documents` | `deleteDocument` | 删除文档 |
-| `DELETE` | `/api/novels/:novelId/categories` | `deleteCategory` | 删除目录 |
+| 方法     | 路径                              | 对应 `Novel` 方法                   | 说明                         |
+| -------- | --------------------------------- | ----------------------------------- | ---------------------------- |
+| `GET`    | `/api/novels`                     | `listAll`                           | 列出全部小说                 |
+| `POST`   | `/api/novels`                     | `create`                            | 创建小说                     |
+| `GET`    | `/api/novels/:novelId`            | `byID`                              | 获取小说基本信息             |
+| `PATCH`  | `/api/novels/:novelId`            | `rename` / `writeInfo` / `editInfo` | 修改小说元信息               |
+| `DELETE` | `/api/novels/:novelId`            | `destroy`                           | 删除小说                     |
+| `GET`    | `/api/novels/:novelId/list`       | `list`                              | 列出某路径下的内容           |
+| `GET`    | `/api/novels/:novelId/tree`       | `listAsJson`                        | 以 JSON 形式列目录（仅一层） |
+| `POST`   | `/api/novels/:novelId/categories` | `createCategory`                    | 创建空目录                   |
+| `POST`   | `/api/novels/:novelId/read`       | `read`                              | 批量读取文档                 |
+| `POST`   | `/api/novels/:novelId/write`      | `write`                             | 写入（覆盖）文档             |
+| `POST`   | `/api/novels/:novelId/edit`       | `edit`                              | 正则替换编辑文档             |
+| `POST`   | `/api/novels/:novelId/search`     | `search`                            | 语义检索                     |
+| `DELETE` | `/api/novels/:novelId/documents`  | `deleteDocument`                    | 删除文档                     |
+| `DELETE` | `/api/novels/:novelId/categories` | `deleteCategory`                    | 删除目录                     |
 
 ## 错误响应
 
@@ -35,22 +36,22 @@
 
 ```json
 {
-  "error": {
-    "type": "NotExistError",
-    "message": "ID为3的小说不存在"
-  }
+    "error": {
+        "type": "NotExistError",
+        "message": "ID为3的小说不存在"
+    }
 }
 ```
 
 状态码映射（与 [数据模型](./data-model.md#业务异常映射) 一致）：
 
-| 异常 | 状态码 |
-| --- | --- |
-| `InvalidPathError`, `OutOfBoundsError` | `400` |
-| `NotExistError` | `404` |
-| `ExistError` | `409` |
-| `EditFailError` | `422` |
-| 其他 `Error` | `500` |
+| 异常                                   | 状态码 |
+| -------------------------------------- | ------ |
+| `InvalidPathError`, `OutOfBoundsError` | `400`  |
+| `NotExistError`                        | `404`  |
+| `ExistError`                           | `409`  |
+| `EditFailError`                        | `422`  |
+| 其他 `Error`                           | `500`  |
 
 ## 接口详情
 
@@ -64,8 +65,8 @@ GET /api/novels
 
 ```json
 [
-  { "id": 1, "name": "三体" },
-  { "id": 2, "name": "冰与火之歌" }
+    { "id": 1, "name": "三体" },
+    { "id": 2, "name": "冰与火之歌" }
 ]
 ```
 
@@ -131,9 +132,9 @@ DELETE /api/novels/:novelId
 GET /api/novels/:novelId/list?path=/设定&recursive=true
 ```
 
-| Query | 类型 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `path` | string | 必填 | 绝对目录路径 |
+| Query       | 类型    | 默认    | 说明                       |
+| ----------- | ------- | ------- | -------------------------- |
+| `path`      | string  | 必填    | 绝对目录路径               |
 | `recursive` | boolean | `false` | 是否递归；递归最大深度为 5 |
 
 返回 `text/plain`，行格式见 `Novel.list`：
@@ -154,10 +155,25 @@ GET /api/novels/:novelId/tree?path=/设定
 
 ```json
 [
-  { "type": "category", "name": "世界" },
-  { "type": "document", "name": "序章.md" }
+    { "type": "category", "name": "世界" },
+    { "type": "document", "name": "序章.md" }
 ]
 ```
+
+### 创建空目录
+
+```
+POST /api/novels/:novelId/categories
+Content-Type: application/json
+
+{ "path": "/设定/世界/地理" }
+```
+
+响应：`204 No Content`。
+
+- 仅允许在三个根目录下创建（`/设定`、`/大纲`、`/正文`）。
+- 路径可包含不存在的中间目录，后端会逐级创建。
+- 若目标目录已存在，返回 `409 ExistError`。
 
 ### 批量读取文档
 
@@ -172,8 +188,8 @@ Content-Type: application/json
 
 ```json
 [
-  { "path": "/设定/世界/人物卡.md", "text": "..." },
-  { "path": "/正文/序章.md",        "text": "..." }
+    { "path": "/设定/世界/人物卡.md", "text": "..." },
+    { "path": "/正文/序章.md", "text": "..." }
 ]
 ```
 
@@ -220,9 +236,7 @@ Content-Type: application/json
 响应：
 
 ```json
-[
-  { "path": "/设定/世界/魔法体系.md", "text": "..." }
-]
+[{ "path": "/设定/世界/魔法体系.md", "text": "..." }]
 ```
 
 ### 删除文档

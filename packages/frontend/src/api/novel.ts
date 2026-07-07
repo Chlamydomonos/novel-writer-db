@@ -1,5 +1,6 @@
 import { http } from './client';
 import type {
+    CreateCategoryRequest,
     CreateNovelRequest,
     EditDocumentRequest,
     ListQuery,
@@ -37,6 +38,9 @@ export const listTree = (novelId: number, path: string) =>
     http.get<unknown, ListResponse>(`/novels/${novelId}/tree`, {
         params: { path },
     });
+
+export const createCategory = (novelId: number, payload: CreateCategoryRequest) =>
+    http.post<unknown, void>(`/novels/${novelId}/categories`, payload);
 
 export const readDocuments = (novelId: number, paths: string[]) =>
     http.post<unknown, ReadResponse>(`/novels/${novelId}/read`, { paths });

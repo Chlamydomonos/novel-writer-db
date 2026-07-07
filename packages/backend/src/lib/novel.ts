@@ -433,6 +433,54 @@ export class Novel {
         await collection.upsert({ ids: [documentId.toString()], documents: [text] });
     }
 
+    // 创建空目录，支持自动创建中间目录
+    async createCategory(path: string) {
+        if (!path.startsWith('/')) {
+            throw new InvalidPathError('路径必须为绝对路径');
+        }
+
+        const splitted = path.split('/').filter((p) => p.length > 0);
+        if (splitted.length < 2) {
+            throw new InvalidPathError(`无效的路径: ${path}`);
+        }
+
+        for (const item of splitted) {
+            if (item.includes('.')) {
+                throw new InvalidPathError('目录中不能含有`.`');
+            }
+        }
+
+        const db = await getDB();
+        await db.transaction(async (transaction) => {
+            let currentCategoryId: number | undefined;
+            for (let i = 0; i < splitted.length; i++) {
+                const categoryName = splitted[i]!;
+                let model: Category | null;
+
+                if (currentCategoryId) {
+                    model = await Category.findOne({ where: { parentId: currentCategoryId, name: categoryName } });
+                } else {
+                    model = await Category.findOne({ where: { novelId: this.id, name: categoryName } });
+                    if (!model) {
+                        throw new InvalidPathError(`不能在根目录${categoryName}下创建目录`);
+                    }
+                }
+
+                const isLast = i === splitted.length - 1;
+                if (!model) {
+                    model = await Category.create(
+                        { parentId: currentCategoryId!, name: categoryName },
+                        { transaction },
+                    );
+                } else if (isLast) {
+                    throw new ExistError(`目录\`${path}\`已存在`);
+                }
+
+                currentCategoryId = model.id;
+            }
+        });
+    }
+
     // 以正则表达式替换的方式编辑文件
     async edit(path: string, regex: string, replace: string, flags?: string) {
         const text = (await this.read([path]))[0]?.text;

@@ -1,12 +1,12 @@
 /**
  * `/api/novels/:novelId/{list,tree,categories}` 路由实现。
  *
- * 覆盖 `Novel.list/listAsJson/deleteCategory`。
+ * 覆盖 `Novel.list/listAsJson/createCategory/deleteCategory`。
  */
 
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { ListResponse } from '@novel-writer/shared';
-import { listQuerySchema } from '../schemas.js';
+import { createCategorySchema, listQuerySchema } from '../schemas.js';
 import { loadNovelOrError } from './novels.js';
 
 export async function registerCategoryRoutes(app: FastifyInstance) {
@@ -34,6 +34,18 @@ export async function registerCategoryRoutes(app: FastifyInstance) {
             return reply.code(400).send({ error: { type: 'InvalidPathError', message: parsed.error.message } });
         }
         return await request.novel!.listAsJson(parsed.data.path);
+    });
+
+    // -----------------------------------------------------------------------
+    // 创建空目录（支持按路径逐级创建中间目录）
+    // -----------------------------------------------------------------------
+    app.post('/api/novels/:novelId/categories', { ...withNovel }, async (request, reply) => {
+        const parsed = createCategorySchema.safeParse(request.body ?? {});
+        if (!parsed.success) {
+            return reply.code(400).send({ error: { type: 'InvalidPathError', message: parsed.error.message } });
+        }
+        await request.novel!.createCategory(parsed.data.path);
+        return reply.code(204).send();
     });
 
     // -----------------------------------------------------------------------

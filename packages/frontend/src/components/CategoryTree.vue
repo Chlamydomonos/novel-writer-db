@@ -8,7 +8,7 @@ import { ElTree, ElRadioGroup, ElRadio, ElButton, ElIcon, ElInput, ElScrollbar, 
 import { Folder, Document, FolderAdd, DocumentAdd, Edit, Delete, Check, Close } from '@element-plus/icons-vue';
 import { useNovelsStore } from '@/stores/novels';
 import { useEditorStore } from '@/stores/editor';
-import { listTree, readDocuments, writeDocument, deleteDocument, deleteCategory } from '@/api/novel';
+import { listTree, readDocuments, writeDocument, deleteDocument, deleteCategory, createCategory } from '@/api/novel';
 import type { RootCategoryName, TreeNode } from '@novel-writer/shared';
 import type Node from 'element-plus/es/components/tree/src/model/node';
 
@@ -82,22 +82,44 @@ async function loadRoot() {
 // 懒加载子节点
 // ===========================================================================
 async function loadChildren(node: Node, resolve: (children: TreeNodeData[]) => void) {
-    const data: TreeNodeData = node.data as TreeNodeData;
-    if (data.loaded || data.type === 'document') {
+    const novelId = novelsStore.currentId;
+    if (novelId === null) {
+        resolve([]);
+        return;
+    }
+
+    // lazy 模式下，el-tree 可能先请求根节点（node.level === 0）。
+    if (node.level === 0) {
+        try {
+            const nodes = await listTree(novelId, rootPath.value);
+            const children = nodes.map((n) => mapNode(n, rootPath.value));
+            treeData.value = children;
+            resolve(children);
+        } catch {
+            resolve([]);
+        }
+        return;
+    }
+
+    const data = node.data as TreeNodeData | undefined;
+    if (!data || data.type === 'document') {
+        resolve([]);
+        return;
+    }
+    if (data.loaded) {
         resolve(data.children ?? []);
         return;
     }
+
     data.loading = true;
     try {
-        const novelId = novelsStore.currentId;
-        if (novelId === null) {
-            resolve([]);
-            return;
-        }
         const nodes = await listTree(novelId, data.path);
         const children = nodes.map((n) => mapNode(n, data.path));
         data.children = children;
         data.loaded = true;
+        if (children.length === 0) {
+            data.isLeaf = true;
+        }
         resolve(children);
     } catch {
         resolve([]);
@@ -146,6 +168,10 @@ function startAdd(parentPath: string, isCategory: boolean) {
     });
 }
 
+function startAddAtRoot(isCategory: boolean) {
+    startAdd(rootPath.value, isCategory);
+}
+
 async function confirmAdd() {
     const state = addingState.value;
     if (!state || !state.name.trim()) return;
@@ -153,18 +179,16 @@ async function confirmAdd() {
     const novelId = novelsStore.currentId;
     if (novelId === null) return;
 
-    let writePath: string;
-    if (state.isCategory) {
-        // 写入一个占位文档以触发后端自动创建中间目录
-        writePath = `${state.parentPath}/${state.name.trim()}/_placeholder.md`;
-    } else {
-        const trimmed = state.name.trim();
-        const docName = trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
-        writePath = `${state.parentPath}/${docName}`;
-    }
-
     try {
-        await writeDocument(novelId, { path: writePath, text: '' });
+        if (state.isCategory) {
+            const categoryPath = `${state.parentPath}/${state.name.trim()}`;
+            await createCategory(novelId, { path: categoryPath });
+        } else {
+            const trimmed = state.name.trim();
+            const docName = trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`;
+            const writePath = `${state.parentPath}/${docName}`;
+            await writeDocument(novelId, { path: writePath, text: '' });
+        }
         addingState.value = null;
         await loadRoot();
     } catch {
@@ -238,8 +262,8 @@ watch(
 
         <!-- 当前根目录下的新建按钮 -->
         <div class="tree-actions">
-            <ElButton :icon="FolderAdd" link size="small" @click="startAdd(rootPath, true)"> 新建目录 </ElButton>
-            <ElButton :icon="DocumentAdd" link size="small" @click="startAdd(rootPath, false)"> 新建文档 </ElButton>
+            <ElButton :icon="FolderAdd" link size="small" @click="startAddAtRoot(true)"> 新建目录 </ElButton>
+            <ElButton :icon="DocumentAdd" link size="small" @click="startAddAtRoot(false)"> 新建文档 </ElButton>
         </div>
 
         <!-- 树 -->
