@@ -80,8 +80,7 @@ export function registerNovelTools(server: McpServer): void {
         {
             description:
                 '读取当前小说的基本信息，返回 `{ name, info }`：' +
-                '`name` 为小说名称，`info` 为小说的整段基本信息文本。' +
-                '调用需在请求头携带目标小说 ID。',
+                '`name` 为小说名称，`info` 为小说的整段基本信息文本。',
             inputSchema: z.object({}),
         },
         async (_args, ctx) => {
@@ -101,9 +100,7 @@ export function registerNovelTools(server: McpServer): void {
     server.registerTool(
         'write_info',
         {
-            description:
-                '整体覆盖小说的基本信息（`info` 字段，一段长文本）。' +
-                '调用需在请求头携带目标小说 ID。成功返回最新 `{ name, info }`。',
+            description: '整体覆盖小说的基本信息（`info` 字段，一段长文本）。' + '成功返回最新 `{ name, info }`。',
             inputSchema: z.object({
                 info: z.string().describe('新的小说基本信息全文'),
             }),
