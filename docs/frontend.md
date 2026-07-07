@@ -61,7 +61,7 @@ packages/
         ├── views/
         │   ├── NovelList.vue      # 选择/创建/删除小说
         │   ├── NovelWorkspace.vue # 工作区（左树 + 右内容）
-        │   └── Settings.vue       # 修改小说 info（writeInfo，整体覆盖）
+        │   └── NovelSettings.vue   # 修改小说 info（writeInfo，整体覆盖）
         ├── components/
         │   ├── CategoryTree.vue   # 目录树（基于 el-tree）
         │   ├── DocumentEditor.vue # 纯文本编辑（el-input textarea）
@@ -132,7 +132,7 @@ packages/
 - 提交 `POST /search`，结果展示在下方 `el-scrollbar` 列表中
 - 结果列表点击 → 在文档编辑区打开（自动调 read）
 
-### 3. 设置 `Settings.vue`
+### 3. 设置 `NovelSettings.vue`
 
 - 显示并可整体覆盖 `info`（`PATCH /info`，即 `PATCH /api/novels/:id` body `{ info }`），通过 `el-input type="textarea"`
 - **重命名小说**走同一 `PATCH` 接口的 `body.name`
