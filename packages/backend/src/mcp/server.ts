@@ -16,7 +16,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { registerNovelTools } from './tools.js';
 
 /** MCP server 对外通告的名称与版本（协议 initialize 阶段返回）。 */
-export const MCP_SERVER_NAME = 'novel-writer-mcp';
+export const MCP_SERVER_NAME = 'novel-writer-db';
 export const MCP_SERVER_VERSION = '0.1.0';
 
 /**

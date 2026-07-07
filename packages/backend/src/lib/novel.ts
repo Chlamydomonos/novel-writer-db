@@ -218,6 +218,7 @@ export class Novel {
         const parse = (result: SearchResult, indents: number, output: { value: string }) => {
             output.value += ' '.repeat(indents);
             output.value += `${result.icon} ${result.name}`;
+            output.value += '\n';
             for (const child of result.children) {
                 parse(child, indents + 2, output);
             }
@@ -565,6 +566,8 @@ export class Novel {
             await Category.destroy({ where: { id }, transaction });
         });
 
-        await collection.delete({ ids: documentIds.map((i) => i.toString()) });
+        if (documentIds.length > 0) {
+            await collection.delete({ ids: documentIds.map((i) => i.toString()) });
+        }
     }
 }
