@@ -73,5 +73,23 @@ services:
     networks:
       - main
 
+  # nginx 是整个 compose 对外的唯一出口（:80）：
+  #   - 静态托管前端 dist（packages/frontend/dist）
+  #   - 反代 /api/* → backend:3000
+  #   - 反代 /mcp   → backend:3000（关 buffering 支持流式）
+  nginx:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: packages/frontend/Dockerfile
+    container_name: nginx
+    depends_on:
+      - backend
+    ports:
+      # 宿主机对外端口 3912 → 容器内 nginx :80
+      - "3912:80"
+    networks:
+      - main
+
 networks:
   main:

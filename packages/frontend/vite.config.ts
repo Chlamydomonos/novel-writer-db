@@ -13,9 +13,14 @@ export default defineConfig({
         },
     },
     server: {
-        // 开发期：将 /api 请求代理到后端 (默认 http://localhost:3000)
+        // 开发期：把 /api/* 请求代理到宿主机 nginx（部署在 3912 端口）的 /api/*
+        // 即 http://localhost:3912/api/* —— 由 nginx 二次反代到容器内 backend
+        // 与生产前端的同源访问路径完全一致（浏览器 → nginx → backend）
         proxy: {
-            '/api': 'http://localhost:3000',
+            '/api': {
+                target: 'http://localhost:3912',
+                changeOrigin: true,
+            },
         },
     },
     css: {

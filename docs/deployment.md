@@ -1,31 +1,31 @@
 # 部署
 
-本文档说明如何把 nginx（统一反向代理 + 静态托管）、后端（HTTP API + MCP）与前端（Vue SPA）纳入 `docker-compose.yml` 整体编排。整套对外**只发布一个端口**（默认宿主机 `:80`），其余服务全部收敛到 compose 内部网络 `main`。
+本文档说明如何把 nginx（统一反向代理 + 静态托管）、后端（HTTP API + MCP）与前端（Vue SPA）纳入 `docker-compose.yml` 整体编排。整套对外**只发布一个端口**（默认宿主机 `:3912` → 容器内 nginx `:80`），其余服务全部收敛到 compose 内部网络 `main`。
 
 ## 设计原则
 
-- **唯一出口**：`nginx` 容器是整个系统对外的唯一入口，宿主机只发布 `80:80`。
+- **唯一出口**：`nginx` 容器是整个系统对外的唯一入口，宿主机只发布 `3912:80`（外部 `:3912` → 容器内 nginx `:80`）。
 - **服务名内网通信**：`backend` / `chroma` / `embedding` 都只在 `main` 网络可达，不再向宿主机发布端口。
 - **同源策略**：前端静态产物、`/api/*`、`/mcp` 全部由 nginx 同一域名 / 同一端口提供，前后端同源，避免 CORS。
 - **请求头透传**：nginx 默认透传自定义头（如 `X-Novel-Id`），无需特殊配置。
 
 ## 与上一版方案差异
 
-| 维度 | 旧方案 | 新方案 |
-| --- | --- | --- |
-| 对外端口 | `3000`(backend) + `80`(frontend) + `8000`(chroma) | **仅 `80`**(nginx) |
-| backend | `ports: 3000:3000` | 仅 `expose: 3000`，反代入口收敛到 nginx |
-| chroma | `ports: 8000:8000` | 仅 `expose: 8000`，下线对外端口 |
-| frontend | 名为 frontend 的 nginx 容器，但后端 :3000 也对外 | 改名为 `nginx`，并成为唯一出口；后端不再发布端口 |
+| 维度     | 旧方案                                            | 新方案                                           |
+| -------- | ------------------------------------------------- | ------------------------------------------------ |
+| 对外端口 | `3000`(backend) + `80`(frontend) + `8000`(chroma) | **仅 `3912`**(nginx)                             |
+| backend  | `ports: 3000:3000`                                | 仅 `expose: 3000`，反代入口收敛到 nginx          |
+| chroma   | `ports: 8000:8000`                                | 仅 `expose: 8000`，下线对外端口                  |
+| frontend | 名为 frontend 的 nginx 容器，但后端 :3000 也对外  | 改名为 `nginx`，并成为唯一出口；后端不再发布端口 |
 
 ## 现状
 
 当前 `docker-compose.yml` 已编排两个**基础设施**容器：
 
-| 服务 | 用途 | 对外端口 |
-| --- | --- | --- |
-| `chroma` | 向量库 | `8000:8000`（新方案将收敛） |
-| `embedding` | Qwen3 嵌入（GPU） | 不暴露 |
+| 服务        | 用途              | 对外端口                    |
+| ----------- | ----------------- | --------------------------- |
+| `chroma`    | 向量库            | `8000:8000`（新方案将收敛） |
+| `embedding` | Qwen3 嵌入（GPU） | 不暴露                      |
 
 两者位于自定义网络 `main` 中，通过服务名互访。
 
@@ -34,7 +34,7 @@
 ```
                 宿主机
                   │
-              :80（唯一对外端口）
+              :3912（唯一对外端口，映射到容器内 :80）
                   ▼
         ┌─────────────────────┐
         │       nginx          │  前端 dist 静态托管 +
@@ -59,18 +59,18 @@
 
 ```yaml
 services:
-  nginx:
-    restart: unless-stopped
-    build:
-      context: .
-      dockerfile: packages/frontend/Dockerfile
-    container_name: nginx
-    depends_on:
-      - backend
-    ports:
-      - '80:80'      # 整个 compose 仅此一端口对外
-    networks:
-      - main
+    nginx:
+        restart: unless-stopped
+        build:
+            context: .
+            dockerfile: packages/frontend/Dockerfile
+        container_name: nginx
+        depends_on:
+            - backend
+        ports:
+            - '3912:80' # 宿主机 3912 → 容器 80；整个 compose 仅此一端口对外
+        networks:
+            - main
 ```
 
 ### `backend`
@@ -78,32 +78,32 @@ services:
 后端**不发布端口**，仅 `expose: 3000` 供同网络的 nginx 访问。后端必须容器化，因为代码以服务名访问 chroma/embedding（见 [技术架构](./architecture.md#运行时依赖外部服务)）。
 
 ```yaml
-  backend:
+backend:
     restart: unless-stopped
     build:
-      context: .
-      dockerfile: packages/backend/Dockerfile
+        context: .
+        dockerfile: packages/backend/Dockerfile
     container_name: backend
     depends_on:
-      chroma:
-        condition: service_healthy
-      embedding:
-        condition: service_healthy
+        chroma:
+            condition: service_healthy
+        embedding:
+            condition: service_healthy
     environment:
-      NODE_ENV: production
-      PORT: '3000'
-      # 仍需 0.0.0.0：nginx 是另一个容器，不共享 backend 的 loopback
-      HOST: '0.0.0.0'
+        NODE_ENV: production
+        PORT: '3000'
+        # 仍需 0.0.0.0：nginx 是另一个容器，不共享 backend 的 loopback
+        HOST: '0.0.0.0'
     expose:
-      - '3000'
+        - '3000'
     volumes:
-      # SQLite 存储路径在 db/sequelize.ts 中写死为 /data/db.sqlite3
-      - ./local/backendData:/data
+        # SQLite 存储路径在 db/sequelize.ts 中写死为 /data/db.sqlite3
+        - ./local/backendData:/data
     networks:
-      - main
+        - main
 ```
 
-> 关键变化：原方案 backend 发布 `3000:3000`，新方案改为只 `expose`，对外端口收敛到 nginx 的 `:80`。注意 `HOST=0.0.0.0` 仍必须设置——nginx 与 backend 是**不同容器**，后者若只绑 `127.0.0.1`，nginx 将连不上。
+> 关键变化1：原方案 backend 发布 `3000:3000`，新方案改为只 `expose`，对外端口收敛到 nginx 的 `:3912`。注意 `HOST=0.0.0.0` 仍必须设置——nginx 与 backend 是**不同容器**，后者若只绑 `127.0.0.1`，nginx 将连不上。
 >
 > `db/sequelize.ts` 中 `storage: '/data/db.sqlite3'`，必须把宿主目录挂载到容器 `/data` 才能持久化。
 
@@ -112,18 +112,18 @@ services:
 移除 `chroma` 的 `ports: 8000:8000`，仅保留 `expose: 8000`；`embedding` 本就不对外。两者只在 `main` 网络内可达。
 
 ```yaml
-  chroma:
+chroma:
     # …其余字段不变
     expose:
-      - '8000'
+        - '8000'
     # 删除原 ports: ['8000:8000']
 ```
 
 ```yaml
-  embedding:
+embedding:
     # …其余字段不变（GPU、healthcheck、command 全部保留）
     expose:
-      - '8000'
+        - '8000'
 ```
 
 ## nginx 配置
@@ -210,7 +210,7 @@ CMD ["node", "packages/backend/dist/main.js"]
 >
 > runtime stage 不再需要 `python3/make/g++`（生产依赖中 sqlite3 已编译）。若 `pnpm install --prod` 仍触发 native 重建，可在 runtime 也加 `apk add python3 make g++ sqlite-dev`，或换用 `node:22-bookworm-slim`。
 
-### `packages/frontend/Dockerfile`（即 nginx 镜像，对外 :80）
+### `packages/frontend/Dockerfile`（即 nginx 镜像，容器内 `EXPOSE 80`；对外端口由 compose `3912:80` 映射）
 
 ```dockerfile
 FROM node:22-alpine AS build
@@ -232,81 +232,87 @@ EXPOSE 80
 
 ```yaml
 services:
-  chroma:
-    restart: unless-stopped
-    image: chromadb/chroma:latest
-    container_name: chroma
-    volumes:
-      - ./local/chromaData:/data
-    expose: ['8000']           # ← 不再发布 8000:8000
-    networks: [main]
-    healthcheck:               # 同现状
-      { test: ["CMD-SHELL", "bash -c '...'"], interval: 10s, timeout: 5s, retries: 3 }
+    chroma:
+        restart: unless-stopped
+        image: chromadb/chroma:latest
+        container_name: chroma
+        volumes:
+            - ./local/chromaData:/data
+        expose: ['8000'] # ← 不再发布 8000:8000
+        networks: [main]
+        healthcheck: # 同现状
+            { test: ['CMD-SHELL', "bash -c '...'"], interval: 10s, timeout: 5s, retries: 3 }
 
-  embedding:
-    restart: unless-stopped
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
-    container_name: embedding
-    volumes: [./local/models:/models]
-    expose: ['8000']
-    networks: [main]
-    deploy:                    # GPU 同现状
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    command: >
-      -m /models/Qwen3-Embedding-0.6B-f16.gguf
-      --host 0.0.0.0 --port 8000 --embedding --n-gpu-layers 99
-    healthcheck:
-      { test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"], interval: 10s, timeout: 5s, retries: 3, start_period: 30s }
+    embedding:
+        restart: unless-stopped
+        image: ghcr.io/ggml-org/llama.cpp:server-cuda
+        container_name: embedding
+        volumes: [./local/models:/models]
+        expose: ['8000']
+        networks: [main]
+        deploy: # GPU 同现状
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu]
+        command: >
+            -m /models/Qwen3-Embedding-0.6B-f16.gguf
+            --host 0.0.0.0 --port 8000 --embedding --n-gpu-layers 99
+        healthcheck:
+            {
+                test: ['CMD-SHELL', 'curl -f http://localhost:8000/health || exit 1'],
+                interval: 10s,
+                timeout: 5s,
+                retries: 3,
+                start_period: 30s,
+            }
 
-  backend:
-    restart: unless-stopped
-    build:
-      context: .
-      dockerfile: packages/backend/Dockerfile
-    container_name: backend
-    depends_on:
-      chroma:    { condition: service_healthy }
-      embedding: { condition: service_healthy }
-    environment:
-      NODE_ENV: production
-      PORT: '3000'
-      HOST: '0.0.0.0'
-    expose: ['3000']           # ← 不再发布 3000:3000
-    volumes: [./local/backendData:/data]
-    networks: [main]
+    backend:
+        restart: unless-stopped
+        build:
+            context: .
+            dockerfile: packages/backend/Dockerfile
+        container_name: backend
+        depends_on:
+            chroma: { condition: service_healthy }
+            embedding: { condition: service_healthy }
+        environment:
+            NODE_ENV: production
+            PORT: '3000'
+            HOST: '0.0.0.0'
+        expose: ['3000'] # ← 不再发布 3000:3000
+        volumes: [./local/backendData:/data]
+        networks: [main]
 
-  nginx:                      # ★ 唯一对外出口
-    restart: unless-stopped
-    build:
-      context: .
-      dockerfile: packages/frontend/Dockerfile
-    container_name: nginx
-    depends_on: [backend]
-    ports: ['80:80']
-    networks: [main]
+    nginx: # ★ 唯一对外出口
+        restart: unless-stopped
+        build:
+            context: .
+            dockerfile: packages/frontend/Dockerfile
+        container_name: nginx
+        depends_on: [backend]
+        ports: ['3912:80'] # 宿主机 3912 → 容器 80
+        networks: [main]
 
 networks:
-  main:
+    main:
 ```
 
 ## 启动顺序与健康检查
 
 ```yaml
 backend:
-  depends_on:
-    chroma:
-      condition: service_healthy
-    embedding:
-      condition: service_healthy
+    depends_on:
+        chroma:
+            condition: service_healthy
+        embedding:
+            condition: service_healthy
 
 nginx:
-  depends_on:
-    - backend
+    depends_on:
+        - backend
 ```
 
 chroma / embedding 都配置了 healthcheck，后端在二者就绪后启动，nginx 在后端就绪后启动；客户端首屏只接触 nginx，不会感知后端短暂未就绪。
@@ -315,14 +321,14 @@ chroma / embedding 都配置了 healthcheck，后端在二者就绪后启动，n
 
 `main.ts` 当前已读取以下变量（其余 MCP 相关项待 MCP 阶段实现）：
 
-| 变量 | 默认 | 说明 | 状态 |
-| --- | --- | --- | --- |
-| `PORT` | `3000` | HTTP / MCP 共用监听端口 | 已实现 |
-| `HOST` | `127.0.0.1` | 监听地址；容器化时**必须** `0.0.0.0`（nginx 跨容器访问） | 已实现 |
-| `MCP_PATH` | `/mcp` | MCP endpoint 路径；nginx 中对应 `location = /mcp` 精确匹配 | 待实现 |
-| `MCP_NOVEL_ID_HEADER` | `X-Novel-Id` | 目标小说请求头名；nginx 默认透传 | 待实现 |
-| `CHROMA_HOST` / `CHROMA_PORT` | `chroma` / `8000` | 向量库（容器内服务名写死，可预留） | 待实现 |
-| `EMBEDDING_BASE` | `http://embedding:8000/v1` | 嵌入服务 | 待实现 |
+| 变量                          | 默认                       | 说明                                                       | 状态   |
+| ----------------------------- | -------------------------- | ---------------------------------------------------------- | ------ |
+| `PORT`                        | `3000`                     | HTTP / MCP 共用监听端口                                    | 已实现 |
+| `HOST`                        | `127.0.0.1`                | 监听地址；容器化时**必须** `0.0.0.0`（nginx 跨容器访问）   | 已实现 |
+| `MCP_PATH`                    | `/mcp`                     | MCP endpoint 路径；nginx 中对应 `location = /mcp` 精确匹配 | 待实现 |
+| `MCP_NOVEL_ID_HEADER`         | `X-Novel-Id`               | 目标小说请求头名；nginx 默认透传                           | 待实现 |
+| `CHROMA_HOST` / `CHROMA_PORT` | `chroma` / `8000`          | 向量库（容器内服务名写死，可预留）                         | 待实现 |
+| `EMBEDDING_BASE`              | `http://embedding:8000/v1` | 嵌入服务                                                   | 待实现 |
 
 > nginx 反代时建议显式 `proxy_set_header Host $host;`，避免后端日志/校验拿到内部服务名 `backend`。`X-Novel-Id` 这类自定义头 nginx 默认透传，无需额外配置。
 >
@@ -336,15 +342,15 @@ chroma / embedding 都配置了 healthcheck，后端在二者就绪后启动，n
 2. 修改 `db/chroma.ts` 与 `db/embedding.ts`，把 `chroma` / `embedding` 改为 `localhost`，并将 chroma 的 `ports` 临时打开
 3. `pnpm install`
 4. `pnpm --filter backend dev`（需自行加 dev 脚本，例如 `tsx watch src/main.ts`）
-5. `pnpm --filter frontend dev` —— Vite 代理 `/api → localhost:3000`、`/mcp → localhost:3000`，与生产 nginx 路由一致
+5. `pnpm --filter frontend dev` —— Vite 代理 `/api/* → http://localhost:3912/api/*`（即宿主机 nginx），由 nginx 二次反代到 backend；与生产路径完全一致
 
 ## 验收清单
 
 - [ ] `docker compose up` 可一键拉起 chroma / embedding / backend / nginx
-- [ ] `docker compose ps` 中**只有 nginx** 发布宿主机端口（`:80`），backend / chroma / embedding 均无 `ports`
-- [ ] 访问 `http://localhost`（或 `http://localhost:80`）可进入前端
-- [ ] `http://localhost/api/novels` 返回 JSON（经 nginx 反代到 backend）
-- [ ] MCP 客户端连 `http://localhost/mcp` 并携带 `X-Novel-Id` 可成功调用工具
+- [ ] `docker compose ps` 中**只有 nginx** 发布宿主机端口（`3912:80`），backend / chroma / embedding 均无 `ports`
+- [ ] 访问 `http://localhost:3912` 可进入前端
+- [ ] `http://localhost:3912/api/novels` 返回 JSON（经 nginx 反代到 backend）
+- [ ] MCP 客户端连 `http://localhost:3912/mcp` 并携带 `X-Novel-Id` 可成功调用工具
 - [ ] 宿主机重启后，`./local/backendData` 与 `./local/chromaData` 持久化数据
 
 ## pnpm workspace 注意事项
