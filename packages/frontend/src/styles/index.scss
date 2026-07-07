@@ -1,0 +1,5 @@
+// 全局样式入口：依次加载 reset → 变量 → Element Plus 主题覆盖
+// 组件内通过 @use '@/styles/variables' as *; 复用业务变量
+@use 'reset';
+@use 'variables';
+@use 'element';

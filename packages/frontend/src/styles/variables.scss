@@ -1,0 +1,23 @@
+// 业务变量：颜色 / 间距 / 字号 / 圆角 / 阴影
+// 同时供 :root CSS 变量与组件 <style scoped lang="scss"> @use 复用
+
+:root {
+    // 颜色
+    --app-bg: #f5f7fa;
+    --app-fg: #303133;
+    --app-muted: #909399;
+
+    // 间距
+    --app-padding: 16px;
+    --app-gap: 12px;
+    --app-radius: 8px;
+
+    // 字号
+    --app-font-base: 14px;
+    --app-font-sm: 12px;
+    --app-font-lg: 18px;
+
+    // 边框 / 阴影
+    --app-border: #dcdfe6;
+    --app-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.08);
+}

@@ -1,0 +1,15 @@
+// Element Plus 主题覆盖：通过 el-* CSS 变量自定义主色 / 暗色模式等
+@use 'variables' as *;
+
+:root {
+    --el-color-primary: #409eff;
+    --el-border-radius-base: var(--app-radius);
+}
+
+// 暗色模式预留：在 <html class="dark"> 时切换背景与前景
+html.dark {
+    --app-bg: #1d1e1f;
+    --app-fg: #e5eaf3;
+    --app-muted: #a3a6ad;
+    --app-border: #414243;
+}

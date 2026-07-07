@@ -10,19 +10,21 @@
 
 ## 技术栈
 
-| 维度 | 选型 | 理由 |
-| --- | --- | --- |
-| 框架 | Vue 3 + `<script setup>` | 用户指定 |
-| 构建 | Vite | 生态默认 |
-| 语言 | TypeScript | 与后端一致 |
-| 样式 | SCSS（`sass` + Dart Sass） | 嵌套、变量、混入更利于组织主题与组件样式 |
-| 路由 | Vue Router | 视图分页 |
-| 状态 | Pinia（可选） | 小说列表/当前选中态 |
-| UI 库 | Element Plus | 树/表格/对话框组件成熟，主题与暗色模式完善 |
-| HTTP | axios（实例 + 拦截器） | 拦截器统一处理 baseURL、错误、取消请求 |
-| 文档编辑 | 原生 `<textarea>`/`el-input` | 直接编辑纯文本，无需 Markdown 渲染/语法 |
-| 包管理 | pnpm（与 monorepo 一致） | 新建 `packages/frontend` |
-| 类型共享 | 独立包 `packages/shared` | 前后端同 monorepo 引用，避免字段漂移 |
+| 维度     | 选型                         | 理由                                       |
+| -------- | ---------------------------- | ------------------------------------------ |
+| 框架     | Vue 3 + `<script setup>`     | 用户指定                                   |
+| 构建     | Vite                         | 生态默认                                   |
+| 语言     | TypeScript                   | 与后端一致                                 |
+| 样式     | SCSS（`sass` + Dart Sass）   | 嵌套、变量、混入更利于组织主题与组件样式   |
+| 路由     | Vue Router                   | 视图分页                                   |
+| 状态     | Pinia（可选）                | 小说列表/当前选中态                        |
+| UI 库    | Element Plus                 | 树/表格/对话框组件成熟，主题与暗色模式完善 |
+| HTTP     | axios（实例 + 拦截器）       | 拦截器统一处理 baseURL、错误、取消请求     |
+| 文档编辑 | 原生 `<textarea>`/`el-input` | 直接编辑纯文本，无需 Markdown 渲染/语法    |
+| 包管理   | pnpm（与 monorepo 一致）     | 新建 `packages/frontend`                   |
+| 类型共享 | 独立包 `packages/shared`     | 前后端同 monorepo 引用，避免字段漂移       |
+
+> **Element Plus 使用约定**：**不使用** `app.use(ElementPlus)` 全局注册，而是在每个 `.vue` 文件中 `import { ElButton } from 'element-plus'` 按需引入组件，以获得完整的 TypeScript 类型提示。模板内使用大驼峰 `<ElButton>`；全局仅导入 `element-plus/dist/index.css` 样式。
 
 **不引入的功能**：
 
@@ -116,11 +118,11 @@ packages/
 - 单击树中的文档 → 调 `POST /read` 拉正文 → 显示到 `el-input type="textarea"`（可全屏/最大化）
 - 操作按钮对应接口：
 
-| 按钮 | 接口 |
-| --- | --- |
-| 保存 | `POST /write`（整体覆盖，传完整正文） |
-| 另存为 | 调用 `POST /write` 用新路径 |
-| 删除 | 二次确认 → `DELETE /documents` |
+| 按钮   | 接口                                  |
+| ------ | ------------------------------------- |
+| 保存   | `POST /write`（整体覆盖，传完整正文） |
+| 另存为 | 调用 `POST /write` 用新路径           |
+| 删除   | 二次确认 → `DELETE /documents`        |
 
 > 不再提供 Markdown 预览与正则替换；编辑即纯文本改动，保存即整体覆盖。
 
@@ -146,13 +148,17 @@ packages/
 import axios, { AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 
 export class ApiError extends Error {
-    constructor(public status: number, public type: string, message: string) {
+    constructor(
+        public status: number,
+        public type: string,
+        message: string,
+    ) {
         super(message);
     }
 }
 
 const http: AxiosInstance = axios.create({
-    baseURL: '/api',                 // 通过 vite proxy 转发到后端
+    baseURL: '/api', // 通过 vite proxy 转发到后端
     timeout: 30_000,
     headers: { 'Content-Type': 'application/json' },
 });
@@ -183,29 +189,28 @@ import { http } from './client';
 import type { NovelSummary } from '@novel-writer/shared';
 
 export const listNovels = () => http.get<unknown, NovelSummary[]>('/novels');
-export const createNovel = (name: string) =>
-    http.post<unknown, NovelSummary>('/novels', { name });
+export const createNovel = (name: string) => http.post<unknown, NovelSummary>('/novels', { name });
 ```
 
 > 把 `ApiError.type` 透传给 UI 层做友好提示（例如 `ExistError` → "小说名已存在"）。
 
 ## 全局样式与主题（`styles/`）
 
-入口 `main.ts` 引入：
+入口 `main.ts` 只导入 CSS（**不全局注册组件**，组件在各 `.vue` 中按需 import，详见上文 Element Plus 使用约定）：
 
 ```ts
 import 'element-plus/dist/index.css';
-import './styles/index.scss';   // 必须在 element-plus css 之后，便于覆盖
+import './styles/index.scss'; // 必须在 element-plus css 之后，便于覆盖
 ```
 
 `styles/` 子模块职责：
 
-| 文件 | 作用 |
-| --- | --- |
-| `variables.scss` | `:root { --app-bg: ...; --app-padding: ...; }` 业务变量，且 `@use` 给 `element.scss` |
-| `element.scss` | 覆盖 Element Plus CSS 变量，如 `:root { --el-color-primary: #... ; }` |
-| `reset.scss` | 简单 reset / box-sizing / 链接默认样式 |
-| `index.scss` | `@use 'reset'; @use 'variables'; @use 'element';`，组件内 `<style scoped lang="scss">` 通过 `@use '@/styles/variables' as *;` 复用变量 |
+| 文件             | 作用                                                                                                                                   |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `variables.scss` | `:root { --app-bg: ...; --app-padding: ...; }` 业务变量，且 `@use` 给 `element.scss`                                                   |
+| `element.scss`   | 覆盖 Element Plus CSS 变量，如 `:root { --el-color-primary: #... ; }`                                                                  |
+| `reset.scss`     | 简单 reset / box-sizing / 链接默认样式                                                                                                 |
+| `index.scss`     | `@use 'reset'; @use 'variables'; @use 'element';`，组件内 `<style scoped lang="scss">` 通过 `@use '@/styles/variables' as *;` 复用变量 |
 
 > Vite 选用 `sass-embedded`（Dart Sass 推荐实现），`pnpm add -D sass-embedded sass` 即可；`@use` 优先于 `@import`。
 
@@ -227,7 +232,7 @@ export default defineConfig({
     },
     css: {
         preprocessorOptions: {
-            scss: { api: 'modern-compiler' },   // 启用 sass-embedded
+            scss: { api: 'modern-compiler' }, // 启用 sass-embedded
         },
     },
 });
@@ -237,12 +242,12 @@ export default defineConfig({
 
 ## 错误展示约定
 
-| 状态 / `error.type` | UI 行为 |
-| --- | --- |
-| `400`（`InvalidPathError`/`OutOfBoundsError`） | inline 提示输入错误，不关闭对话框 |
-| `404`（`NotExistError`） | 提示（`ElMessage`）+ 刷新目录树（可能已被其它客户端删除） |
-| `409`（`ExistError`） | 创建表单显示重名错误 |
-| `5xx` | 全局 toast（`ElNotification`）+ 重试按钮 |
+| 状态 / `error.type`                            | UI 行为                                                   |
+| ---------------------------------------------- | --------------------------------------------------------- |
+| `400`（`InvalidPathError`/`OutOfBoundsError`） | inline 提示输入错误，不关闭对话框                         |
+| `404`（`NotExistError`）                       | 提示（`ElMessage`）+ 刷新目录树（可能已被其它客户端删除） |
+| `409`（`ExistError`）                          | 创建表单显示重名错误                                      |
+| `5xx`                                          | 全局 toast（`ElNotification`）+ 重试按钮                  |
 
 ## 类型共享方案（`packages/shared`）
 
@@ -292,10 +297,18 @@ packages/shared/
 // packages/shared/src/dto.ts
 export type RootCategoryName = '设定' | '大纲' | '正文';
 
-export interface NovelSummary { id: number; name: string; }
-export interface NovelDetail extends NovelSummary { info: string; }
+export interface NovelSummary {
+    id: number;
+    name: string;
+}
+export interface NovelDetail extends NovelSummary {
+    info: string;
+}
 
-export interface DocumentRef { path: string; text: string; }
+export interface DocumentRef {
+    path: string;
+    text: string;
+}
 
 export interface SearchResultItem {
     path: string;
@@ -335,7 +348,7 @@ export interface TreeNode {
 **工程**
 
 - [ ] `@novel-writer/shared` 包已建立并被前后端引用
-- [ ] 使用 Element Plus 作为 UI 库（树/表格/对话框/通知）
+- [ ] 使用 Element Plus 作为 UI 库（树/表格/对话框/通知），按需 import 而非全局注册
 - [ ] 使用 axios 实例 + 拦截器统一请求与错误
 - [ ] 使用 SCSS（`sass-embedded`），样式按 `styles/` 目录组织
 - [ ] 在 `pnpm-workspace.yaml` 已声明的 `packages/*` 下被自动识别
