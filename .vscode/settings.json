@@ -1,3 +1,4 @@
 {
-    "docker.lsp.experimental.scout.criticalHighVulnerabilities": false
+    "docker.lsp.experimental.scout.criticalHighVulnerabilities": false,
+    "cSpell.words": ["chromadb", "ggml", "gguf", "healthcheck", "modelcontextprotocol", "Qwen", "Streamable"]
 }
