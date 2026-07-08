@@ -277,7 +277,7 @@ export class Novel {
             }
             const collection = await chroma.getCollection({ name: `category_${rootId}`, embeddingFunction });
             const text = (await collection.get({ ids: [document.id.toString()] })).documents[0];
-            if (!text) {
+            if (text === undefined || text === null) {
                 throw new NotExistError(`文档\`${parsed.categoryPath}/${parsed.name}不存在\``);
             }
             results.push({ path: `/${parsed.categoryPath}/${parsed.name}`, text });
