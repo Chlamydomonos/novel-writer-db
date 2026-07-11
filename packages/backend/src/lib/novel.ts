@@ -191,59 +191,77 @@ export class Novel {
             return lines.join('\n') + (lines.length > 0 ? '\n' : '');
         }
 
-        // ---- 广度优先遍历（BFS），上限约 50 个条目 ----
+        // ---- 广度优先遍历发现节点，构建树结构后用深度优先输出 ----
+        // BFS 确保条目数达上限后截断的语义正确（先到先得），
+        // 树 + DFS 确保子节点出现在父节点之下。
         const MAX_ENTRIES = 50;
-        const queue: { id: number; depth: number }[] = [{ id: startId, depth: 0 }];
-        const entries: { icon: string; name: string; depth: number }[] = [];
+
+        type TreeNode = { icon: string; name: string; children: TreeNode[] };
+
+        const root: TreeNode = { icon: '', name: '', children: [] };
+        const queue: { parentNode: TreeNode; categoryId: number }[] = [];
+        let entryCount = 0;
         let capped = false;
 
-        while (queue.length > 0) {
-            const { id, depth } = queue.shift()!;
-
-            const childCategories = await Category.findAll({ where: { parentId: id } });
-            const childDocuments = await Document.findAll({ where: { categoryId: id } });
+        const processNode = async (categoryId: number, parentNode: TreeNode) => {
+            const childCategories = await Category.findAll({ where: { parentId: categoryId } });
+            const childDocuments = await Document.findAll({ where: { categoryId } });
 
             for (const cat of childCategories) {
-                if (entries.length >= MAX_ENTRIES) {
-                    capped = true;
-                }
+                if (entryCount >= MAX_ENTRIES) capped = true;
 
                 if (capped) {
-                    // 截断模式：只标记是否为空，不再入队深入
-                    const hasSubCategories = (await Category.count({ where: { parentId: cat.id } })) > 0;
-                    const hasDocuments = (await Document.count({ where: { categoryId: cat.id } })) > 0;
-                    entries.push({
-                        icon: hasSubCategories || hasDocuments ? '📂' : '📁',
+                    const hasContent =
+                        (await Category.count({ where: { parentId: cat.id } })) > 0 ||
+                        (await Document.count({ where: { categoryId: cat.id } })) > 0;
+                    parentNode.children.push({
+                        icon: hasContent ? '📂' : '📁',
                         name: cat.name,
-                        depth,
+                        children: [],
                     });
                 } else {
-                    const hasSubCategories = (await Category.count({ where: { parentId: cat.id } })) > 0;
-                    const hasDocuments = (await Document.count({ where: { categoryId: cat.id } })) > 0;
+                    const hasContent =
+                        (await Category.count({ where: { parentId: cat.id } })) > 0 ||
+                        (await Document.count({ where: { categoryId: cat.id } })) > 0;
 
-                    if (hasSubCategories || hasDocuments) {
-                        entries.push({ icon: '🗂️', name: cat.name, depth });
-                        queue.push({ id: cat.id, depth: depth + 1 });
+                    const node: TreeNode = { icon: '', name: cat.name, children: [] };
+                    parentNode.children.push(node);
+
+                    if (hasContent) {
+                        node.icon = '🗂️';
+                        queue.push({ parentNode: node, categoryId: cat.id });
                     } else {
-                        entries.push({ icon: '📁', name: cat.name, depth });
+                        node.icon = '📁';
                     }
                 }
+                entryCount++;
             }
 
             for (const doc of childDocuments) {
-                if (entries.length >= MAX_ENTRIES) {
-                    capped = true;
-                }
-                entries.push({ icon: '📄', name: doc.name, depth });
+                if (entryCount >= MAX_ENTRIES) capped = true;
+                parentNode.children.push({ icon: '📄', name: doc.name, children: [] });
+                entryCount++;
             }
+        };
+
+        await processNode(startId, root);
+
+        while (queue.length > 0) {
+            const { parentNode, categoryId } = queue.shift()!;
+            await processNode(categoryId, parentNode);
         }
 
-        // 构建输出：使用 `| ` 缩进
+        // 深度优先输出
         const lines: string[] = [];
-        for (const entry of entries) {
-            const indent = entry.depth > 0 ? '| '.repeat(entry.depth) : '';
-            lines.push(`${indent}${entry.icon} ${entry.name}`);
-        }
+        const dfs = (node: TreeNode, depth: number) => {
+            for (const child of node.children) {
+                const indent = depth > 0 ? '| '.repeat(depth) : '';
+                lines.push(`${indent}${child.icon} ${child.name}`);
+                dfs(child, depth + 1);
+            }
+        };
+        dfs(root, 0);
+
         return lines.join('\n') + (lines.length > 0 ? '\n' : '');
     }
 
