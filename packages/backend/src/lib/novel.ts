@@ -12,12 +12,6 @@ import { EditFailError, ExistError, InvalidPathError, NotExistError, OutOfBounds
 export type { RootCategoryName } from '@novel-writer/shared';
 export { ROOT_CATEGORY_NAMES };
 
-type SearchResult = {
-    icon: string;
-    name: string;
-    children: SearchResult[];
-};
-
 export class Novel {
     private constructor(
         readonly id: number,
@@ -177,57 +171,80 @@ export class Novel {
     }
 
     // 列出某一路径下的所有内容
-    // 返回一个多行的字符串，每一行以缩进表示目录层级，以开头的emoji表示目录项类型
+    // 返回一个多行的字符串，每一行以 `| ` 缩进表示目录层级，以开头的emoji表示目录项类型
     // 🗂️表示非空目录，📁表示空目录，📂表示内容未知的目录，📄表示文件
+    // recursive=true 时采用广度优先遍历，条目总数超过 50 后自动截断（非空目录改为📂不再深入）
     async list(path: string, recursive: boolean) {
         const { id: startId } = await this.findCategory(path);
-        const searchDepth = recursive ? 5 : 1;
 
-        const search = async (id: number, depth: number) => {
-            const continueSearch = depth > 1;
-            const results: SearchResult[] = [];
+        if (!recursive) {
+            const categories = await Category.findAll({ where: { parentId: startId } });
+            const documents = await Document.findAll({ where: { categoryId: startId } });
 
-            const categories = await Category.findAll({ where: { parentId: id } });
-            for (const category of categories) {
-                const name = category.name;
-                let icon: string;
-                let children: SearchResult[] = [];
-                if (continueSearch) {
-                    children = await search(category.id, depth - 1);
-                    if (children.length > 0) {
-                        icon = '🗂️';
-                    } else {
-                        icon = '📁';
-                    }
-                } else {
-                    icon = '📂';
-                }
-                results.push({ icon, name, children });
+            const lines: string[] = [];
+            for (const c of categories) {
+                lines.push(`📂 ${c.name}`);
             }
-
-            const documents = await Document.findAll({ where: { categoryId: id } });
-            for (const document of documents) {
-                results.push({ icon: '📄', name: document.name, children: [] });
+            for (const d of documents) {
+                lines.push(`📄 ${d.name}`);
             }
-
-            return results;
-        };
-        const searchResult = await search(startId, searchDepth);
-
-        const result = { value: '' };
-        const parse = (result: SearchResult, indents: number, output: { value: string }) => {
-            output.value += ' '.repeat(indents);
-            output.value += `${result.icon} ${result.name}`;
-            output.value += '\n';
-            for (const child of result.children) {
-                parse(child, indents + 2, output);
-            }
-        };
-        for (const item of searchResult) {
-            parse(item, 0, result);
+            return lines.join('\n') + (lines.length > 0 ? '\n' : '');
         }
 
-        return result.value;
+        // ---- 广度优先遍历（BFS），上限约 50 个条目 ----
+        const MAX_ENTRIES = 50;
+        const queue: { id: number; depth: number }[] = [{ id: startId, depth: 0 }];
+        const entries: { icon: string; name: string; depth: number }[] = [];
+        let capped = false;
+
+        while (queue.length > 0) {
+            const { id, depth } = queue.shift()!;
+
+            const childCategories = await Category.findAll({ where: { parentId: id } });
+            const childDocuments = await Document.findAll({ where: { categoryId: id } });
+
+            for (const cat of childCategories) {
+                if (entries.length >= MAX_ENTRIES) {
+                    capped = true;
+                }
+
+                if (capped) {
+                    // 截断模式：只标记是否为空，不再入队深入
+                    const hasSubCategories = (await Category.count({ where: { parentId: cat.id } })) > 0;
+                    const hasDocuments = (await Document.count({ where: { categoryId: cat.id } })) > 0;
+                    entries.push({
+                        icon: hasSubCategories || hasDocuments ? '📂' : '📁',
+                        name: cat.name,
+                        depth,
+                    });
+                } else {
+                    const hasSubCategories = (await Category.count({ where: { parentId: cat.id } })) > 0;
+                    const hasDocuments = (await Document.count({ where: { categoryId: cat.id } })) > 0;
+
+                    if (hasSubCategories || hasDocuments) {
+                        entries.push({ icon: '🗂️', name: cat.name, depth });
+                        queue.push({ id: cat.id, depth: depth + 1 });
+                    } else {
+                        entries.push({ icon: '📁', name: cat.name, depth });
+                    }
+                }
+            }
+
+            for (const doc of childDocuments) {
+                if (entries.length >= MAX_ENTRIES) {
+                    capped = true;
+                }
+                entries.push({ icon: '📄', name: doc.name, depth });
+            }
+        }
+
+        // 构建输出：使用 `| ` 缩进
+        const lines: string[] = [];
+        for (const entry of entries) {
+            const indent = entry.depth > 0 ? '| '.repeat(entry.depth) : '';
+            lines.push(`${indent}${entry.icon} ${entry.name}`);
+        }
+        return lines.join('\n') + (lines.length > 0 ? '\n' : '');
     }
 
     // 以Json格式列出某一路径下的所有内容。该接口不暴露给LLM

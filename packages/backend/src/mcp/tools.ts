@@ -150,10 +150,11 @@ export function registerNovelTools(server: McpServer): void {
         'list',
         {
             description:
-                '列出指定目录下的内容，返回多行文本，每行格式为 `<emoji> <name>`：' +
+                '列出指定目录下的内容，返回多行文本，每行格式为 `<indent><emoji> <name>`：' +
                 '🗂️ 表示非空目录、📁 表示空目录、📂 表示深度未知目录、📄 表示 markdown 文档。' +
-                '目录层级通过缩进表示：每深一层缩进增加 2 个空格（与父级对齐即同一层级）。' +
-                '`path` 必须为绝对路径（如 `/设定`）；`recursive=true` 时向下递归最多 5 层。' +
+                '目录层级通过 `| ` 缩进表示：每深一层多加一个 `| ` 前缀。' +
+                '`path` 必须为绝对路径（如 `/设定`）；`recursive=true` 时广度优先遍历，最多列出大约 50 个条目，' +
+                '超出后非空目录统一标记为 📂 不再深入。' +
                 '注意：返回的文本不包含文档正文。',
             inputSchema: z.object({
                 path: PathField,
