@@ -19,5 +19,23 @@
     },
     "editor.codeActionsOnSave": {
         "source.fixAll": "explicit"
-    }
+    },
+    "latex-workshop.latex.tools": [
+        {
+            "name": "xelatex",
+            "command": "xelatex",
+            "args": ["-synctex=1", "-interaction=nonstopmode", "-file-line-error", "%DOC%"]
+        }
+    ],
+    "latex-workshop.latex.recipes": [
+        {
+            "name": "xelatex (单次)",
+            "tools": ["xelatex"]
+        },
+        {
+            "name": "xelatex × 2",
+            "tools": ["xelatex", "xelatex"]
+        }
+    ],
+    "latex-workshop.latex.recipe.default": "xelatex × 2"
 }
