@@ -39,7 +39,7 @@ novel-writer-db/                       # pnpm monorepo 根
 │   │                   ├── document.ts
 │   │                   └── novel.ts
 │   │
-│   └── frontend/                      # 计划中：Vue 3 SPA（引用 shared 类型）
+│   └── frontend/                      # ✅ 已完成：Vue 3 SPA（引用 shared 类型）
 │
 └── docs/                              # 本文档目录
 ```
@@ -63,7 +63,7 @@ novel-writer-db/                       # pnpm monorepo 根
 
 ## 分层架构
 
-````
+```
             ┌────────────────────────────┐
             │  LLM / Agent（外部调用方）    │
             └────────────────────────────┘
@@ -112,7 +112,7 @@ novel-writer-db/                       # pnpm monorepo 根
 │   backend     │                  │     frontend      │
 │ (含 lib/novel)│                  │   （Vue 3 SPA）   │
 └──────────────┘                  └──────────────────┘
-````
+```
 
 > 后端 `lib/novel.ts` 已从 `@novel-writer/shared` 引入并再导出 `RootCategoryName`/`ROOT_CATEGORY_NAMES`，使既有 `import { RootCategoryName } from '../lib/novel.js'` 的调用方继续工作，同时保证类型单一来源。
 
@@ -120,10 +120,10 @@ novel-writer-db/                       # pnpm monorepo 根
 
 后端**单进程**，同时承载：
 
-| 监听端口（建议） | 路径前缀 | 服务 |
-| --- | --- | --- |
-| `3000` | `/api/*` | HTTP REST API（供前端） |
-| `3000` | `/mcp` | MCP Streamable HTTP endpoint |
+| 监听端口（建议） | 路径前缀 | 服务                         |
+| ---------------- | -------- | ---------------------------- |
+| `3000`           | `/api/*` | HTTP REST API（供前端）      |
+| `3000`           | `/mcp`   | MCP Streamable HTTP endpoint |
 
 > 两者共用同一个 HTTP 服务器，由路径与请求头分流；也可视情况拆为两端口。
 
@@ -137,10 +137,10 @@ novel-writer-db/                       # pnpm monorepo 根
 
 由 `docker-compose.yml` 提供，全部加入 `main` 自定义网络：
 
-| 容器 | 用途 | 对外端口 | 内部地址 |
-| --- | --- | --- | --- |
-| `chroma` | 向量库 | `8000:8000` | `chroma:8000` |
-| `embedding` | Qwen3 嵌入推理（GPU） | 不暴露 | `embedding:8000` |
+| 容器        | 用途                  | 对外端口    | 内部地址         |
+| ----------- | --------------------- | ----------- | ---------------- |
+| `chroma`    | 向量库                | `8000:8000` | `chroma:8000`    |
+| `embedding` | Qwen3 嵌入推理（GPU） | 不暴露      | `embedding:8000` |
 
 注意：后端代码以**容器内服务名**访问两者（见 `db/embedding.ts` 的 `apiBase: 'http://embedding:8000/v1'` 与 `db/chroma.ts` 的 `host: 'chroma'`）。后端**必须容器化部署**或通过等同网络配置访问；本地裸跑需要先改这两处为 `localhost:8000` 并通过 `ports` 访问。
 
@@ -188,17 +188,20 @@ HTTP API 已基于 **Fastify** 落地（`packages/backend/src/http/`），三层
 
 [→ 详细工具定义见 MCP 文档](./mcp-server.md)
 
-- 入口解析自定义请求头（如 `X-Novel-Id`）
-- 仅向 LLM 暴露受限工具集（不含 `create`/`destroy`/`rename` 等）
+MCP 服务器已基于 MCP TypeScript SDK v2 beta 实现，与 HTTP API 共用同一 Fastify 实例（`/mcp` 路径）：
+
+- 入口解析自定义请求头 `X-Novel-Id`（可通过 `MCP_NOVEL_ID_HEADER` 环境变量覆盖）
+- 仅向 LLM 暴露受限工具集（不含 `create`/`destroy`/`rename`/`listAll`/`byID` 等管理接口）
 - 单个 endpoint 服务所有小说，由请求头切换目标
+- 每次请求通过 `createMcpHandler` 的 factory 创建全新 `McpServer` 实例，天然隔离不同小说
 
 ## 非功能性要求
 
-| 维度 | 要求 |
-| --- | --- |
-| 语言/类型 | TS `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` |
-| 模块系统 | 原生 ESM（`"type": "module"`），import 必须带 `.js` 扩展名 |
-| 类型共享 | 前后端共用以 `workspace:*` 协议依赖的 `@novel-writer/shared`，单一类型来源 |
-| 部署形态 | 仅支持容器化（外部依赖通过服务名访问） |
-| SQLite 模式 | WAL + `synchronous=NORMAL` + `busy_timeout=5000`（已设置） |
-| SQLite 连接池 | `max=min=1`，所有写入串行 |
+| 维度          | 要求                                                                       |
+| ------------- | -------------------------------------------------------------------------- |
+| 语言/类型     | TS `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`    |
+| 模块系统      | 原生 ESM（`"type": "module"`），import 必须带 `.js` 扩展名                 |
+| 类型共享      | 前后端共用以 `workspace:*` 协议依赖的 `@novel-writer/shared`，单一类型来源 |
+| 部署形态      | 仅支持容器化（外部依赖通过服务名访问）                                     |
+| SQLite 模式   | WAL + `synchronous=NORMAL` + `busy_timeout=5000`（已设置）                 |
+| SQLite 连接池 | `max=min=1`，所有写入串行                                                  |

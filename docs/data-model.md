@@ -1,5 +1,7 @@
 # 数据模型
 
+> ✅ **实现状态：已完成。** 本文档描述的数据模型已全部落地于 `packages/backend/src/lib/db/models/`（Sequelize）和 ChromaDB 集合中。
+
 本文档梳理数据存储结构，是 HTTP API、MCP 工具设计的前置约束。
 
 ## 关系层：Sequelize 模型
@@ -8,26 +10,27 @@
 
 ### `Novel`（`models/novel.ts`）
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | INTEGER | PK, AUTO_INCREMENT | |
-| `name` | STRING | NOT NULL | 小说名，**唯一性不在表约束层**，由业务层 `Novel.create` 检查 |
-| `info` | STRING | NOT NULL, DEFAULT `''` | 小说基本信息（自由文本） |
+| 字段   | 类型    | 约束                   | 说明                                                         |
+| ------ | ------- | ---------------------- | ------------------------------------------------------------ |
+| `id`   | INTEGER | PK, AUTO_INCREMENT     |                                                              |
+| `name` | STRING  | NOT NULL               | 小说名，**唯一性不在表约束层**，由业务层 `Novel.create` 检查 |
+| `info` | STRING  | NOT NULL, DEFAULT `''` | 小说基本信息（自由文本）                                     |
 
 关系：`HasMany(Category)`，外键 `novelId` `ON DELETE CASCADE`。
 
 ### `Category`（`models/category.ts`）
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | INTEGER | PK, AUTO_INCREMENT | |
-| `name` | STRING | NOT NULL | 目录名 |
-| `novelId` | INTEGER | nullable | **仅顶层（根）Category** 拥有，指向所属 Novel |
-| `parentId` | INTEGER | nullable | **仅非顶层 Category** 拥有，指向父 Category |
+| 字段       | 类型    | 约束               | 说明                                          |
+| ---------- | ------- | ------------------ | --------------------------------------------- |
+| `id`       | INTEGER | PK, AUTO_INCREMENT |                                               |
+| `name`     | STRING  | NOT NULL           | 目录名                                        |
+| `novelId`  | INTEGER | nullable           | **仅顶层（根）Category** 拥有，指向所属 Novel |
+| `parentId` | INTEGER | nullable           | **仅非顶层 Category** 拥有，指向父 Category   |
 
 > ⚠️ `novelId` 与 `parentId` 是**互斥**的：根目录用 `novelId`，子目录用 `parentId`。代码中通过"先查 `parentId`，未命中再查 `novelId`"的方式区分层级（见 `Novel.findCategory`）。设计新接口时需沿用此约定。
 
 关系：
+
 - `BelongsTo(Novel)`（外键 `novelId` `ON DELETE CASCADE`）
 - `BelongsTo(Category)` 作为 parent（自引用）
 - `HasMany(Category)` 作为 children
@@ -35,11 +38,11 @@
 
 ### `Document`（`models/document.ts`）
 
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | INTEGER | PK, AUTO_INCREMENT | **即 ChromaDB 中的 doc id（字符串化）** |
-| `name` | STRING | NOT NULL | 必须以 `.md` 结尾 |
-| `categoryId` | INTEGER | NOT NULL | 所属 Category |
+| 字段         | 类型    | 约束               | 说明                                    |
+| ------------ | ------- | ------------------ | --------------------------------------- |
+| `id`         | INTEGER | PK, AUTO_INCREMENT | **即 ChromaDB 中的 doc id（字符串化）** |
+| `name`       | STRING  | NOT NULL           | 必须以 `.md` 结尾                       |
+| `categoryId` | INTEGER | NOT NULL           | 所属 Category                           |
 
 关系：`BelongsTo(Category)`（外键 `categoryId` `ON DELETE CASCADE`）。
 
@@ -68,6 +71,7 @@ const texts     = await Category.create({ name: '正文', novelId: model.id }, .
 ```
 
 代码中**禁止**：
+
 - 路径不以 `/` 开头 → `InvalidPathError`
 - 路径只到根目录层级（`splitted.length < 2` 在读写时）→ `InvalidPathError`
 - 任何路径段包含 `.`（避免与文件名扩展名混淆）→ `InvalidPathError`
@@ -85,11 +89,11 @@ category#<rootCategoryId>
 
 ### Document 与向量条目的对应
 
-| Chroma 字段 | 来源 |
-| --- | --- |
-| `id` | `Document.id.toString()` |
-| `document` | 文档正文 |
-| 向量 | 由 `embeddingFunction` 自动生成 |
+| Chroma 字段 | 来源                            |
+| ----------- | ------------------------------- |
+| `id`        | `Document.id.toString()`        |
+| `document`  | 文档正文                        |
+| 向量        | 由 `embeddingFunction` 自动生成 |
 
 embeddingFunction 配置（`db/embedding.ts`）：
 
@@ -115,25 +119,25 @@ new OpenAIEmbeddingFunction({
 
 `lib/errors.ts` 中定义的异常及对应业务含义（HTTP 状态码建议见 [HTTP API](./http-api.md#错误响应)）：
 
-| 异常类 | 代表场景 | 建议 HTTP 状态码 |
-| --- | --- | --- |
-| `ExistError` | 创建重名小说 | `409 Conflict` |
-| `NotExistError` | 路径/ID 不存在 | `404 Not Found` |
-| `InvalidPathError` | 路径格式不合法、写根目录等 | `400 Bad Request` |
-| `OutOfBoundsError` | `limit` 越界、空入参 | `400 Bad Request` |
-| `EditFailError` | 正则替换后字符串未变化 | `422 Unprocessable Entity` |
+| 异常类             | 代表场景                   | 建议 HTTP 状态码           |
+| ------------------ | -------------------------- | -------------------------- |
+| `ExistError`       | 创建重名小说               | `409 Conflict`             |
+| `NotExistError`    | 路径/ID 不存在             | `404 Not Found`            |
+| `InvalidPathError` | 路径格式不合法、写根目录等 | `400 Bad Request`          |
+| `OutOfBoundsError` | `limit` 越界、空入参       | `400 Bad Request`          |
+| `EditFailError`    | 正则替换后字符串未变化     | `422 Unprocessable Entity` |
 
 ## 事务与一致性
 
 > 修复后（见 git 历史）的写操作事务边界如下。统一原则：**Sequelize 事务只包含 SQL 写入**；ChromaDB 操作移出事务，作为 SQL 提交后的"尽力而为"步骤执行。这是为了规避"Chroma 抛错导致 SQL 回滚但向量无法恢复"以及"Chroma 卡死阻塞唯一 SQLite 连接"等问题。
 
-| 操作 | 顺序 |
-| --- | --- |
-| `Novel.create` | ① 事务：创建 Novel + 三个根 Category → ② 事务外：为三个根分别 `createCollection` |
-| `write` | ① 事务：创建/复用 Category 与 Document，返回 `{ documentId, rootCategoryId }` → ② 事务外：`collection.upsert` |
-| `deleteDocument` | ① 事务：根据路径取出 documentId 并 `destroy` → ② 事务外：`collection.delete(ids)` |
+| 操作             | 顺序                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Novel.create`   | ① 事务：创建 Novel + 三个根 Category → ② 事务外：为三个根分别 `createCollection`                                                           |
+| `write`          | ① 事务：创建/复用 Category 与 Document，返回 `{ documentId, rootCategoryId }` → ② 事务外：`collection.upsert`                              |
+| `deleteDocument` | ① 事务：根据路径取出 documentId 并 `destroy` → ② 事务外：`collection.delete(ids)`                                                          |
 | `deleteCategory` | ① 递归收集 `documentIds`（`await findFiles`）→ ② 事务：`Document.destroy(Op.in)` + `Category.destroy` → ③ 事务外：`collection.delete(ids)` |
-| `destroy` | ① 查出三个根 Category → ② 事务：`Novel.destroy` → ③ 事务外：对三 collection 逐个 `deleteCollection`（每条独立 try/catch） |
+| `destroy`        | ① 查出三个根 Category → ② 事务：`Novel.destroy` → ③ 事务外：对三 collection 逐个 `deleteCollection`（每条独立 try/catch）                  |
 
 ### 修复后的残留语义风险
 

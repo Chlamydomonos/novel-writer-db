@@ -4,12 +4,14 @@
 
 ## 项目目标
 
-工作区当前已完成核心业务逻辑（`packages/backend/src/lib/novel.ts`），后续需实现两个对外暴露能力的子系统：
+本项目已完成全部四个阶段，实现了从核心业务逻辑到前端界面、MCP 服务器、容器化部署的完整闭环。
 
-| 子系统 | 协议 | 说明 |
-| --- | --- | --- |
-| **MCP 服务器** | HTTP（Streamable HTTP） | 供 LLM/Agent 工具调用，**仅限编辑**指定小说的内容；小说 ID 通过 HTTP 请求头传入。 |
-| **HTTP API + Vue 前端** | HTTP（REST） | 供人工通过 Web 界面调用所有接口，进行小说的全生命周期管理。 |
+工作区当前各子系统状态如下：
+
+| 子系统                  | 协议                    | 说明                                                                              | 状态      |
+| ----------------------- | ----------------------- | --------------------------------------------------------------------------------- | --------- |
+| **MCP 服务器**          | HTTP（Streamable HTTP） | 供 LLM/Agent 工具调用，**仅限编辑**指定小说的内容；小说 ID 通过 HTTP 请求头传入。 | ✅ 已完成 |
+| **HTTP API + Vue 前端** | HTTP（REST）            | 供人工通过 Web 界面调用所有接口，进行小说的全生命周期管理。                       | ✅ 已完成 |
 
 ## 技术栈
 
@@ -20,7 +22,7 @@
 - **向量数据库**：ChromaDB
 - **嵌入模型**：Qwen3-Embedding-0.6B（gguf，由 llama.cpp 提供 OpenAI 兼容接口，GPU 加速）
 - **MCP**：`@modelcontextprotocol/server` + `@modelcontextprotocol/node` + `@modelcontextprotocol/fastify`（v2 beta）+ `zod`
-- **前端**：Vue 3（计划中）
+- **前端**：Vue 3（已完成）
 
 > 详见 [技术架构](./architecture.md)。
 
@@ -28,24 +30,24 @@
 
 每个小说创建时，自动生成三个**根目录**（root category），它们的名称固定且不可删除：
 
-| 名称 | 中文含义 | 典型用途 |
-| --- | --- | --- |
+| 名称   | 中文含义         | 典型用途                       |
+| ------ | ---------------- | ------------------------------ |
 | `设定` | 世界观/角色/物品 | 存放小说世界观、人物卡等元数据 |
-| `大纲` | 故事结构 | 存放分卷、章节大纲 |
-| `正文` | 正文内容 | 存放实际章节文本 |
+| `大纲` | 故事结构         | 存放分卷、章节大纲             |
+| `正文` | 正文内容         | 存放实际章节文本               |
 
 所有根目录下均可创建任意层级的子目录（非根 category）和 markdown 文档（`.md`）。向量索引按**根目录**粒度建立（ChromaDB collection 名为 `category#<rootCategoryId>`）。详见 [数据模型](./data-model.md)。
 
 ## 进度路线图
 
-后续工作分为四个阶段，对应文档如下：
+四个阶段均已落地：
 
-1. **HTTP API 层** —— 把 `Novel` 类的能力包装成 REST 接口，作为前端与 MCP 共用的底座。**已基本落地**（基于 Fastify，见 [HTTP API](./http-api.md)）。
-2. **MCP 服务器** —— 在 HTTP 入口之外，暴露受限工具集给 LLM。详见 [MCP 服务器](./mcp-server.md)。
-3. **Vue 前端** —— 通过 HTTP API 完成可视化全功能管理。详见 [前端](./frontend.md)。
-4. **容器化与部署** —— 把后端/前端一并纳入 `docker-compose.yml`。详见 [部署](./deployment.md)。
+1. **HTTP API 层** —— 把 `Novel` 类的能力包装成 REST 接口，作为前端与 MCP 共用的底座。✅ 已完成（基于 Fastify，见 [HTTP API](./http-api.md)）。
+2. **MCP 服务器** —— 在 HTTP 入口之外，暴露受限工具集给 LLM。✅ 已完成（见 [MCP 服务器](./mcp-server.md)）。
+3. **Vue 前端** —— 通过 HTTP API 完成可视化全功能管理。✅ 已完成（见 [前端](./frontend.md)）。
+4. **容器化与部署** —— 把后端/前端一并纳入 `docker-compose.yml`。✅ 已完成（见 [部署](./deployment.md)）。
 
-> 前端与 MCP 容器化需要 `packages/frontend`，目前尚未初始化；MCP endpoint 的监听路径由 `main.ts` 中追加注册。
+> 前端与 MCP 均已接入 Fastify 同一进程，MCP endpoint 挂载于 `/mcp` 路径。全栈通过 `docker compose up` 一键部署，对外仅暴露 nginx 的 `3912` 端口。
 
 ## 关键设计决策
 

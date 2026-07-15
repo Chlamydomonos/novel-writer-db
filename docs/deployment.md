@@ -1,5 +1,7 @@
 # 部署
 
+> ✅ **实现状态：已完成。** 本文档描述的 Docker Compose 编排方案已全部落地，可通过 `docker compose up` 一键启动全部服务。
+
 本文档说明如何把 nginx（统一反向代理 + 静态托管）、后端（HTTP API + MCP）与前端（Vue SPA）纳入 `docker-compose.yml` 整体编排。整套对外**只发布一个端口**（默认宿主机 `:3912` → 容器内 nginx `:80`），其余服务全部收敛到 compose 内部网络 `main`。
 
 ## 设计原则
@@ -20,14 +22,16 @@
 
 ## 现状
 
-当前 `docker-compose.yml` 已编排两个**基础设施**容器：
+当前 `docker-compose.yml` 已编排全部四个服务容器：
 
-| 服务        | 用途              | 对外端口                    |
-| ----------- | ----------------- | --------------------------- |
-| `chroma`    | 向量库            | `8000:8000`（新方案将收敛） |
-| `embedding` | Qwen3 嵌入（GPU） | 不暴露                      |
+| 服务        | 用途                    | 对外端口                  |
+| ----------- | ----------------------- | ------------------------- |
+| `nginx`     | 前端静态托管 + 反向代理 | `3912:80`（唯一对外端口） |
+| `backend`   | HTTP API + MCP          | 仅 `expose: 3000`         |
+| `chroma`    | 向量库                  | 仅 `expose: 8000`         |
+| `embedding` | Qwen3 嵌入（GPU）       | 不暴露                    |
 
-两者位于自定义网络 `main` 中，通过服务名互访。
+四者位于自定义网络 `main` 中，通过服务名互访。
 
 ## 目标拓扑
 
@@ -321,14 +325,14 @@ chroma / embedding 都配置了 healthcheck，后端在二者就绪后启动，n
 
 `main.ts` 当前已读取以下变量（其余 MCP 相关项待 MCP 阶段实现）：
 
-| 变量                          | 默认                       | 说明                                                       | 状态   |
-| ----------------------------- | -------------------------- | ---------------------------------------------------------- | ------ |
-| `PORT`                        | `3000`                     | HTTP / MCP 共用监听端口                                    | 已实现 |
-| `HOST`                        | `127.0.0.1`                | 监听地址；容器化时**必须** `0.0.0.0`（nginx 跨容器访问）   | 已实现 |
-| `MCP_PATH`                    | `/mcp`                     | MCP endpoint 路径；nginx 中对应 `location = /mcp` 精确匹配 | 待实现 |
-| `MCP_NOVEL_ID_HEADER`         | `X-Novel-Id`               | 目标小说请求头名；nginx 默认透传                           | 待实现 |
-| `CHROMA_HOST` / `CHROMA_PORT` | `chroma` / `8000`          | 向量库（容器内服务名写死，可预留）                         | 待实现 |
-| `EMBEDDING_BASE`              | `http://embedding:8000/v1` | 嵌入服务                                                   | 待实现 |
+| 变量                          | 默认                       | 说明                                                       | 状态      |
+| ----------------------------- | -------------------------- | ---------------------------------------------------------- | --------- |
+| `PORT`                        | `3000`                     | HTTP / MCP 共用监听端口                                    | ✅ 已实现 |
+| `HOST`                        | `127.0.0.1`                | 监听地址；容器化时**必须** `0.0.0.0`（nginx 跨容器访问）   | ✅ 已实现 |
+| `MCP_PATH`                    | `/mcp`                     | MCP endpoint 路径；nginx 中对应 `location = /mcp` 精确匹配 | ✅ 已实现 |
+| `MCP_NOVEL_ID_HEADER`         | `X-Novel-Id`               | 目标小说请求头名；nginx 默认透传                           | ✅ 已实现 |
+| `CHROMA_HOST` / `CHROMA_PORT` | `chroma` / `8000`          | 向量库（容器内服务名写死，可预留）                         | ⚠️ 硬编码 |
+| `EMBEDDING_BASE`              | `http://embedding:8000/v1` | 嵌入服务                                                   | ⚠️ 硬编码 |
 
 > nginx 反代时建议显式 `proxy_set_header Host $host;`，避免后端日志/校验拿到内部服务名 `backend`。`X-Novel-Id` 这类自定义头 nginx 默认透传，无需额外配置。
 >
@@ -346,12 +350,12 @@ chroma / embedding 都配置了 healthcheck，后端在二者就绪后启动，n
 
 ## 验收清单
 
-- [ ] `docker compose up` 可一键拉起 chroma / embedding / backend / nginx
-- [ ] `docker compose ps` 中**只有 nginx** 发布宿主机端口（`3912:80`），backend / chroma / embedding 均无 `ports`
-- [ ] 访问 `http://localhost:3912` 可进入前端
-- [ ] `http://localhost:3912/api/novels` 返回 JSON（经 nginx 反代到 backend）
-- [ ] MCP 客户端连 `http://localhost:3912/mcp` 并携带 `X-Novel-Id` 可成功调用工具
-- [ ] 宿主机重启后，`./local/backendData` 与 `./local/chromaData` 持久化数据
+- [x] `docker compose up` 可一键拉起 chroma / embedding / backend / nginx
+- [x] `docker compose ps` 中**只有 nginx** 发布宿主机端口（`3912:80`），backend / chroma / embedding 均无 `ports`
+- [x] 访问 `http://localhost:3912` 可进入前端
+- [x] `http://localhost:3912/api/novels` 返回 JSON（经 nginx 反代到 backend）
+- [x] MCP 客户端连 `http://localhost:3912/mcp` 并携带 `X-Novel-Id` 可成功调用工具
+- [x] 宿主机重启后，`./local/backendData` 与 `./local/chromaData` 持久化数据
 
 ## pnpm workspace 注意事项
 

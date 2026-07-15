@@ -1,5 +1,7 @@
 # 前端（Vue 3）
 
+> ✅ **实现状态：已完成。** 本文档描述的前端方案已全部落地于 `packages/frontend/`。
+
 本文档定义用于可视化调用全部接口的 Web 前端。前端**仅消费 [HTTP API](./http-api.md)**，不直接接触 MCP。
 
 ## 目标
@@ -31,9 +33,7 @@
 - ❌ Markdown 编辑器（不复用 bytemd / md-editor-v3），文档一律按纯文本编辑
 - ❌ 正则表达式替换（前端不实现 `/edit`、`body.infoEdit` 通道）
 
-## 工作区结构
-
-**Monorepo 新增两个包**：
+## 工作区结构（已落地）
 
 ```
 packages/
@@ -338,17 +338,17 @@ export interface TreeNode {
 
 **功能**
 
-- [ ] 可列出/创建/删除/重命名小说
-- [ ] 可在三个根目录下浏览（递归开关）
-- [ ] 可读/写/删除 `.md` 文档（按纯文本编辑）
-- [ ] 可按根目录做语义检索并点击结果打开文档
-- [ ] 可整体覆盖小说 `info`
-- [ ] 全部业务异常有清晰 UI 反馈
+- [x] 可列出/创建/删除/重命名小说
+- [x] 可在三个根目录下浏览（递归开关）
+- [x] 可读/写/删除 `.md` 文档（按纯文本编辑）
+- [x] 可按根目录做语义检索并点击结果打开文档
+- [x] 可整体覆盖小说 `info`
+- [x] 全部业务异常有清晰 UI 反馈
 
 **工程**
 
-- [ ] `@novel-writer/shared` 包已建立并被前后端引用
-- [ ] 使用 Element Plus 作为 UI 库（树/表格/对话框/通知），按需 import 而非全局注册
-- [ ] 使用 axios 实例 + 拦截器统一请求与错误
-- [ ] 使用 SCSS（`sass-embedded`），样式按 `styles/` 目录组织
-- [ ] 在 `pnpm-workspace.yaml` 已声明的 `packages/*` 下被自动识别
+- [x] `@novel-writer/shared` 包已建立并被前后端引用
+- [x] 使用 Element Plus 作为 UI 库（树/表格/对话框/通知），按需 import 而非全局注册
+- [x] 使用 axios 实例 + 拦截器统一请求与错误
+- [x] 使用 SCSS（`sass-embedded`），样式按 `styles/` 目录组织
+- [x] 在 `pnpm-workspace.yaml` 已声明的 `packages/*` 下被自动识别
