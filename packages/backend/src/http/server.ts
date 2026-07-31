@@ -15,6 +15,7 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import { sendError } from './errors.js';
 import { registerCategoryRoutes } from './routes/categories.js';
 import { registerDocumentRoutes } from './routes/documents.js';
+import { registerExperimentRoutes } from './routes/experiments.js';
 import { registerNovelRoutes } from './routes/novels.js';
 import { buildMcpServer } from '../mcp/server.js';
 import { MCP_PATH } from './mcp.js';
@@ -36,6 +37,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await app.register(registerNovelRoutes);
     await app.register(registerDocumentRoutes);
     await app.register(registerCategoryRoutes);
+    await app.register(registerExperimentRoutes);
 
     // ---------------------------------------------------------------------
     // 挂载 MCP 单 endpoint：`POST|GET|DELETE /mcp`。

@@ -12,6 +12,10 @@
         "./dto": {
             "types": "./dist/dto.d.ts",
             "import": "./dist/dto.js"
+        },
+        "./dto-experiment": {
+            "types": "./dist/dto-experiment.d.ts",
+            "import": "./dist/dto-experiment.js"
         }
     },
     "main": "./dist/index.js",

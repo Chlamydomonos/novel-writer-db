@@ -1,0 +1,77 @@
+[
+    {
+        "query": "魔法场是如何产生的？魔源之雨的运行机制是什么？",
+        "rootCategory": "设定",
+        "relevantPaths": ["/设定/魔法体系/魔法的本质：高维三明治结构.md"]
+    },
+    {
+        "query": "吸血鬼的起源是什么？他们真的吸血吗？",
+        "rootCategory": "设定",
+        "relevantPaths": ["/设定/种族/吸血鬼.md"]
+    },
+    {
+        "query": "林安是怎么来到锇星的？他的飞船发生了什么？",
+        "rootCategory": "正文",
+        "relevantPaths": ["/正文/第一卷/第一章/第一节.md"]
+    },
+    {
+        "query": "林安在泽溪村醒来后发生了什么？米莎和小豆是谁？",
+        "rootCategory": "正文",
+        "relevantPaths": ["/正文/第一卷/第二章/第一节.md", "/正文/第一卷/第二章/第二节.md"]
+    },
+    {
+        "query": "十二律级是什么体系？如何计算、测定战力等级？",
+        "rootCategory": "设定",
+        "relevantPaths": ["/设定/魔法体系/十二律级.md"]
+    },
+    {
+        "query": "故事整体分为几卷？每卷的核心主题分别是什么？",
+        "rootCategory": "大纲",
+        "relevantPaths": ["/大纲/整体大纲/整体结构.md"]
+    },
+    {
+        "query": "第一魔法使是谁？他的身份和目的是什么？",
+        "rootCategory": "设定",
+        "relevantPaths": ["/设定/神话/天启/第一魔法使.md"]
+    },
+    {
+        "query": "天使是什么存在？他们有什么能力和装备？",
+        "rootCategory": "设定",
+        "relevantPaths": ["/设定/神话/天启/天使.md"]
+    },
+    {
+        "query": "林安如何学习新通用语？他的笔记本记录了哪些内容？",
+        "rootCategory": "正文",
+        "relevantPaths": ["/正文/第一卷/第二章/第五节.md"]
+    },
+    {
+        "query": "北境长城的结构和震天巨炮的原理是什么？",
+        "rootCategory": "设定",
+        "relevantPaths": ["/设定/军事/天枢帝国/北境长城.md"]
+    },
+    {
+        "query": "爆炸剑法的原理和优缺点是什么？",
+        "rootCategory": "设定",
+        "relevantPaths": ["/设定/战斗技术/爆炸剑法.md"]
+    },
+    {
+        "query": "第一章第三节中林安坠落到蘑菇森林后发生了什么？",
+        "rootCategory": "正文",
+        "relevantPaths": ["/正文/第一卷/第一章/第三节.md"]
+    },
+    {
+        "query": "奥利芬特·泰勒如何观测到林安的降临？预兆向量模型是什么？",
+        "rootCategory": "正文",
+        "relevantPaths": ["/正文/第一卷/第一章/第二节.md"]
+    },
+    {
+        "query": "哈希语和本言分别是什么语言？各有什么特点？",
+        "rootCategory": "设定",
+        "relevantPaths": ["/设定/语言/哈希语.md", "/设定/语言/本言.md"]
+    },
+    {
+        "query": "凛光公国当前面临的内忧外患是什么？",
+        "rootCategory": "设定",
+        "relevantPaths": ["/设定/国家/凛光公国.md"]
+    }
+]

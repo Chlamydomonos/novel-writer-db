@@ -415,7 +415,7 @@ export class Novel {
 
     // 写入文件，自动创建目录
     // 只能在`/设定`，`/大纲`，`/正文`这三个根目录中写入文件
-    async write(path: string, text: string) {
+    async write(path: string, text: string): Promise<{ documentId: number }> {
         if (!path.startsWith('/')) {
             throw new InvalidPathError('路径必须为绝对路径');
         }
@@ -467,6 +467,8 @@ export class Novel {
         const chroma = await getChroma();
         const collection = await chroma.getCollection({ name: `category_${rootCategoryId}`, embeddingFunction });
         await collection.upsert({ ids: [documentId.toString()], documents: [text] });
+
+        return { documentId };
     }
 
     // 创建空目录，支持自动创建中间目录

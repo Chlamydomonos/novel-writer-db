@@ -6,3 +6,4 @@
  */
 
 export * from './dto.js';
+export * from './dto-experiment.js';

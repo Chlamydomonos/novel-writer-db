@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import { ROOT_CATEGORY_NAMES } from '@novel-writer/shared';
+import type { ImportNode } from '@novel-writer/shared/dto-experiment';
 
 // ===========================================================================
 // 辅助 schema
@@ -83,4 +84,43 @@ export const searchSchema = z.object({
     rootCategory: z.enum(ROOT_CATEGORY_NAMES),
     texts: z.array(z.string()).min(1),
     limit: z.number().int().min(1).max(20),
+});
+
+// ===========================================================================
+// 实验相关 schema
+// ===========================================================================
+
+/** 导入节点（递归） */
+const importNodeSchema: z.ZodType<ImportNode> = z.lazy(() =>
+    z
+        .object({
+            name: z.string().min(1),
+            content: z.string().optional(),
+            children: z.array(importNodeSchema).optional(),
+        })
+        .refine(
+            (n) => {
+                const isDoc = n.name.endsWith('.md');
+                if (isDoc) return n.content !== undefined && (n.children === undefined || n.children.length === 0);
+                return n.content === undefined;
+            },
+            { message: '文档节点（.md）必须有 content 且无 children；目录节点不能有 content' },
+        ),
+);
+
+export const importExperimentSchema = z.object({
+    settings: z.array(importNodeSchema).optional().default([]),
+    outlines: z.array(importNodeSchema).optional().default([]),
+    chapters: z.array(importNodeSchema).optional().default([]),
+});
+
+export const testQuerySchema = z.object({
+    query: z.string().min(1),
+    rootCategory: z.enum(ROOT_CATEGORY_NAMES),
+    relevantPaths: z.array(z.string().min(1).startsWith('/')).min(1),
+});
+
+export const runExperimentSchema = z.object({
+    k: z.number().int().min(1).max(20).optional().default(5),
+    queries: z.array(testQuerySchema).min(1),
 });
