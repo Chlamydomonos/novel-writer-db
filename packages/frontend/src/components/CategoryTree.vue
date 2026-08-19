@@ -5,7 +5,7 @@
 
 import { ref, computed, watch, nextTick } from 'vue';
 import { ElTree, ElRadioGroup, ElRadio, ElButton, ElIcon, ElInput, ElScrollbar, ElMessageBox } from 'element-plus';
-import { Folder, Document, FolderAdd, DocumentAdd, Edit, Delete, Check, Close } from '@element-plus/icons-vue';
+import { Folder, Document, FolderAdd, DocumentAdd, Edit, Delete, Check, Close, Refresh } from '@element-plus/icons-vue';
 import { useNovelsStore } from '@/stores/novels';
 import { useEditorStore } from '@/stores/editor';
 import { listTree, readDocuments, writeDocument, deleteDocument, deleteCategory, createCategory } from '@/api/novel';
@@ -17,6 +17,11 @@ import type Node from 'element-plus/es/components/tree/src/model/node';
 // ===========================================================================
 const novelsStore = useNovelsStore();
 const editorStore = useEditorStore();
+
+// ===========================================================================
+// 刷新状态
+// ===========================================================================
+const refreshing = ref(false);
 
 // ===========================================================================
 // 内部树节点类型（在 TreeNode 基础上附加路径与加载状态）
@@ -75,6 +80,71 @@ async function loadRoot() {
         treeData.value = nodes.map((n) => mapNode(n, rootPath.value));
     } catch {
         treeData.value = [];
+    }
+}
+
+// ===========================================================================
+// 刷新：重新加载所有已展开目录的内容，保持展开状态
+// ===========================================================================
+
+/** 递归刷新已加载的目录节点（保持展开状态）。 */
+async function refreshNode(data: TreeNodeData, novelId: number) {
+    if (data.type !== 'category' || !data.loaded) return;
+
+    try {
+        const nodes = await listTree(novelId, data.path);
+        const newChildren = nodes.map((n) => mapNode(n, data.path));
+
+        // 保留旧子节点中已加载的孙节点（递归刷新）
+        for (const newChild of newChildren) {
+            if (newChild.type === 'category') {
+                const oldChild = data.children?.find((c) => c.path === newChild.path);
+                if (oldChild?.loaded) {
+                    newChild.children = oldChild.children;
+                    newChild.loaded = true;
+                    newChild.isLeaf = oldChild.isLeaf;
+                    await refreshNode(newChild, novelId);
+                }
+            }
+        }
+
+        data.children = newChildren;
+        if (newChildren.length === 0) {
+            data.isLeaf = true;
+        }
+    } catch {
+        // 节点可能已被删除，跳过
+    }
+}
+
+async function refreshAll() {
+    const novelId = novelsStore.currentId;
+    if (novelId === null) return;
+
+    refreshing.value = true;
+    try {
+        // 重新加载根目录一级子节点
+        const nodes = await listTree(novelId, rootPath.value);
+        const newRoot = nodes.map((n) => mapNode(n, rootPath.value));
+
+        // 保留已加载的子节点并递归刷新
+        for (const newChild of newRoot) {
+            if (newChild.type === 'category') {
+                const oldChild = treeData.value.find((c) => c.path === newChild.path);
+                if (oldChild?.loaded) {
+                    newChild.children = oldChild.children;
+                    newChild.loaded = true;
+                    newChild.isLeaf = oldChild.isLeaf;
+                    await refreshNode(newChild, novelId);
+                }
+            }
+        }
+
+        treeData.value = newRoot;
+    } catch {
+        // 刷新失败，静默忽略
+    } finally {
+        refreshing.value = false;
     }
 }
 
@@ -264,6 +334,7 @@ watch(
         <div class="tree-actions">
             <ElButton :icon="FolderAdd" link size="small" @click="startAddAtRoot(true)"> 新建目录 </ElButton>
             <ElButton :icon="DocumentAdd" link size="small" @click="startAddAtRoot(false)"> 新建文档 </ElButton>
+            <ElButton :icon="Refresh" link size="small" :loading="refreshing" @click="refreshAll"> 刷新 </ElButton>
         </div>
 
         <!-- 树 -->
