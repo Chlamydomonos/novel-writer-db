@@ -1,0 +1,94 @@
+name: novel-writer-db
+
+services:
+  chroma:
+    restart: unless-stopped
+    image: chromadb/chroma:latest
+    container_name: chroma
+    volumes:
+      - ./local/chromaData:/data
+    expose:
+      - 8000
+    networks:
+      - main
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -c 'exec 3<>/dev/tcp/localhost/8000 && echo -e \"GET /api/v2/heartbeat HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3 && cat <&3 | grep -q nanosecond'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # 本文件不编排 `embedding` 容器：嵌入模型由外部服务提供（OpenAI 兼容接口）。
+  # backend 通过环境变量连接远程地址，其余服务与 docker-compose.yml 完全一致。
+  #
+  # 环境变量（均可覆盖，compose 会读取同目录 .env 文件，也可直接用 shell 注入）：
+  #   EMBEDDING_API_BASE — 远程嵌入服务的 OpenAI 兼容地址，必须以 /v1 结尾。
+  #       默认 http://host.docker.internal:8000/v1，即宿主机上自跑的 llama.cpp server。
+  #   EMBEDDING_API_KEY  — API key。llama.cpp 不校验，占位符即可；真实云厂商须填有效 key。
+  #   EMBEDDING_MODEL    — 模型名。llama.cpp 忽略该字段；云厂商须填真实模型名。
+  #
+  # 用法示例：
+  #   # 1) 远程地址＝宿主机 8000 端口（默认值，Linux 需要 host-gateway，文件已配置）
+  #   docker compose -f docker-compose.external-embedding.yml up -d
+  #
+  #   # 2) 远程地址＝局域网内另一台机器
+  #   EMBEDDING_API_BASE=http://192.168.1.50:8000/v1 \
+  #   docker compose -f docker-compose.external-embedding.yml up -d
+  #
+  #   # 3) 云厂商 OpenAI 兼容服务
+  #   EMBEDDING_API_BASE=https://api.example.com/v1 \
+  #   EMBEDDING_API_KEY=sk-xxx EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B \
+  #   docker compose -f docker-compose.external-embedding.yml up -d
+  backend:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    container_name: backend
+    depends_on:
+      chroma:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # nginx 是另一个容器，backend 必须绑到 0.0.0.0 才能被反代访问
+      HOST: "0.0.0.0"
+      # 嵌入服务指向外部地址（默认取同目录 .env 或 shell 中的值；无则回落到宿主机 8000 端口）
+      EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-http://10.13.15.1:4100/v1}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:---}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-Qwen3-Embedding-0.6B-f16.gguf}
+    # 让 host.docker.internal 在 Linux 上也解析到宿主机（Docker Desktop 原生支持）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "3000"
+    volumes:
+      # SQLite 持久化：db/sequelize.ts 中 storage: '/data/db.sqlite3'
+      - ./local/backendData:/data
+    networks:
+      - main
+
+  # nginx 是整个 compose 对外的唯一出口（:80）：
+  #   - 静态托管前端 dist（packages/frontend/dist）
+  #   - 反代 /api/* → backend:3000
+  #   - 反代 /mcp   → backend:3000（关 buffering 支持流式）
+  nginx:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: packages/frontend/Dockerfile
+    container_name: nginx
+    depends_on:
+      - backend
+    ports:
+      # 宿主机对外端口 3912 → 容器内 nginx :80
+      - "3912:80"
+    networks:
+      - main
+
+networks:
+  main:

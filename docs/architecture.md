@@ -142,7 +142,7 @@ novel-writer-db/                       # pnpm monorepo 根
 | `chroma`    | 向量库                | `8000:8000` | `chroma:8000`    |
 | `embedding` | Qwen3 嵌入推理（GPU） | 不暴露      | `embedding:8000` |
 
-注意：后端代码以**容器内服务名**访问两者（见 `db/embedding.ts` 的 `apiBase: 'http://embedding:8000/v1'` 与 `db/chroma.ts` 的 `host: 'chroma'`）。后端**必须容器化部署**或通过等同网络配置访问；本地裸跑需要先改这两处为 `localhost:8000` 并通过 `ports` 访问。
+注意：后端代码以**容器内服务名**访问两者（`db/embedding.ts` 默认 `apiBase` 为 `http://embedding:8000/v1`，可通过 `EMBEDDING_API_BASE` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL` 环境变量覆盖，支持外部嵌入服务部署；`db/chroma.ts` 的 `host: 'chroma'` 为硬编码）。后端**必须容器化部署**或通过等同网络配置访问；本地裸跑需要通过等同网络配置（chroma 需临时打开 `ports`，embedding 可直接注入 `EMBEDDING_API_BASE=http://localhost:8000/v1`）。
 
 ## 数据流向
 

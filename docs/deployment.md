@@ -321,29 +321,63 @@ nginx:
 
 chroma / embedding 都配置了 healthcheck，后端在二者就绪后启动，nginx 在后端就绪后启动；客户端首屏只接触 nginx，不会感知后端短暂未就绪。
 
+## 使用外部嵌入服务部署（`docker-compose.external-embedding.yml`）
+
+该文件与主 `docker-compose.yml` 的服务集合差异：**不编排 `embedding` 容器**，嵌入模型由外部地址提供。
+
+- backend 仅等待 `chroma` 就绪（不再依赖 `embedding` healthcheck）
+- backend 通过 `EMBEDDING_API_BASE` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL` 连接外部嵌入服务，地址必须为 OpenAI 兼容 base URL（以 `/v1` 结尾）
+- 默认 `EMBEDDING_API_BASE` 为 `http://host.docker.internal:8000/v1`（宿主机 8000 端口），并已配置 `extra_hosts: [host.docker.internal:host-gateway]` 保证 Linux 可达
+- 其余服务（chroma / backend / nginx）与端口发布与主 compose 完全一致，对外仍仅暴露 `3912:80`
+
+覆盖嵌入地址任选其一（backend 启动时生效）：
+
+```bash
+# ① shell 环境变量（临时覆盖，例：嵌入式服务跑在内网另一台机器）
+EMBEDDING_API_BASE=http://192.168.1.50:8000/v1 \
+docker compose -f docker-compose.external-embedding.yml up -d
+
+# ② 云厂商 OpenAI 兼容服务（须提供真实 key 与模型名）
+EMBEDDING_API_BASE=https://api.example.com/v1 \
+EMBEDDING_API_KEY=sk-xxx \
+EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B \
+docker compose -f docker-compose.external-embedding.yml up -d
+```
+
+```bash
+# ③ 仓库根目录放置 .env（docker compose 自动读取，长期使用推荐）
+# EMBEDDING_API_BASE=http://host.docker.internal:8000/v1
+# EMBEDDING_API_KEY=--
+# EMBEDDING_MODEL=Qwen3-Embedding-0.6B-f16.gguf
+```
+
+> 注意：llama.cpp 忽略请求中的 `model` 字段（任意值均可）；云厂商则必须给出真实模型名。
+
 ## 环境变量约定
 
 `main.ts` 当前已读取以下变量（其余 MCP 相关项待 MCP 阶段实现）：
 
-| 变量                          | 默认                       | 说明                                                       | 状态      |
-| ----------------------------- | -------------------------- | ---------------------------------------------------------- | --------- |
-| `PORT`                        | `3000`                     | HTTP / MCP 共用监听端口                                    | ✅ 已实现 |
-| `HOST`                        | `127.0.0.1`                | 监听地址；容器化时**必须** `0.0.0.0`（nginx 跨容器访问）   | ✅ 已实现 |
-| `MCP_PATH`                    | `/mcp`                     | MCP endpoint 路径；nginx 中对应 `location = /mcp` 精确匹配 | ✅ 已实现 |
-| `MCP_NOVEL_ID_HEADER`         | `X-Novel-Id`               | 目标小说请求头名；nginx 默认透传                           | ✅ 已实现 |
-| `CHROMA_HOST` / `CHROMA_PORT` | `chroma` / `8000`          | 向量库（容器内服务名写死，可预留）                         | ⚠️ 硬编码 |
-| `EMBEDDING_BASE`              | `http://embedding:8000/v1` | 嵌入服务                                                   | ⚠️ 硬编码 |
+| 变量                          | 默认                                    | 说明                                                       | 状态      |
+| ----------------------------- | --------------------------------------- | ---------------------------------------------------------- | --------- |
+| `PORT`                        | `3000`                                  | HTTP / MCP 共用监听端口                                    | ✅ 已实现 |
+| `HOST`                        | `127.0.0.1`                             | 监听地址；容器化时**必须** `0.0.0.0`（nginx 跨容器访问）   | ✅ 已实现 |
+| `MCP_PATH`                    | `/mcp`                                  | MCP endpoint 路径；nginx 中对应 `location = /mcp` 精确匹配 | ✅ 已实现 |
+| `MCP_NOVEL_ID_HEADER`         | `X-Novel-Id`                            | 目标小说请求头名；nginx 默认透传                           | ✅ 已实现 |
+| `CHROMA_HOST` / `CHROMA_PORT` | `chroma` / `8000`                       | 向量库（容器内服务名写死，可预留）                         | ⚠️ 硬编码 |
+| `EMBEDDING_API_BASE`          | `http://embedding:8000/v1`              | 嵌入服务（OpenAI 兼容 base URL）                           | ✅ 已实现 |
+| `EMBEDDING_API_KEY`           | `--`                                    | API key（llama.cpp 不校验；云厂商须填有效 key）            | ✅ 已实现 |
+| `EMBEDDING_MODEL`             | `/models/Qwen3-Embedding-0.6B-f16.gguf` | 模型名；llama.cpp 忽略，云厂商须填真实模型名               | ✅ 已实现 |
 
 > nginx 反代时建议显式 `proxy_set_header Host $host;`，避免后端日志/校验拿到内部服务名 `backend`。`X-Novel-Id` 这类自定义头 nginx 默认透传，无需额外配置。
 >
-> `db/embedding.ts` 与 `db/chroma.ts` 当前仍硬编码服务名/地址；**建议在落地 PR 中把这两处改为读环境变量**，便于本地裸跑 / 迁移。
+> `db/embedding.ts` 已读入 `EMBEDDING_API_BASE` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL`（代码内默认值即上表所列），配合仓库根的 `docker-compose.external-embedding.yml` 可将嵌入服务指向外部 / 云端地址；`db/chroma.ts` 仍硬编码服务名 `chroma`，如需本地裸跑请通过等同网络配置访问。
 
 ## 开发态快速启动
 
 开发期不强制使用容器（无需 nginx）：
 
 1. `docker compose up -d chroma embedding` —— 只启动基础设施（注意此时 chroma 无对外端口，可临时加 `ports: 8000:8000` override，或直接进入 backend dev 模式）
-2. 修改 `db/chroma.ts` 与 `db/embedding.ts`，把 `chroma` / `embedding` 改为 `localhost`，并将 chroma 的 `ports` 临时打开
+2. `db/embedding.ts` 无需改码，启动时注入 `EMBEDDING_API_BASE=http://localhost:8000/v1` 即可指向宿主机 llama.cpp；chroma 仍需将 `ports` 临时打开或通过等同网络配置访问（`db/chroma.ts` 硬编码 `chroma`）
 3. `pnpm install`
 4. `pnpm --filter backend dev`（需自行加 dev 脚本，例如 `tsx watch src/main.ts`）
 5. `pnpm --filter frontend dev` —— Vite 代理 `/api/* → http://localhost:3912/api/*`（即宿主机 nginx），由 nginx 二次反代到 backend；与生产路径完全一致

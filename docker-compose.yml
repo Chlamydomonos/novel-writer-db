@@ -65,6 +65,11 @@ services:
       PORT: "3000"
       # nginx 是另一个容器，backend 必须绑到 0.0.0.0 才能被反代访问
       HOST: "0.0.0.0"
+      # 嵌入服务（OpenAI 兼容接口）：默认指向 compose 内 `embedding` 容器（llama.cpp）。
+      # 如需改用远程嵌入服务（不启动本文件的 embedding 容器），见 docker-compose.external-embedding.yml
+      EMBEDDING_API_BASE: http://embedding:8000/v1
+      EMBEDDING_API_KEY: "--"
+      EMBEDDING_MODEL: /models/Qwen3-Embedding-0.6B-f16.gguf
     expose:
       - "3000"
     volumes:

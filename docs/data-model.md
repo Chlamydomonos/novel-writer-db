@@ -99,13 +99,13 @@ embeddingFunction 配置（`db/embedding.ts`）：
 
 ```ts
 new OpenAIEmbeddingFunction({
-    apiBase: 'http://embedding:8000/v1',
-    apiKey: '--',
-    modelName: '/models/Qwen3-Embedding-0.6B-f16.gguf',
+    apiBase: process.env.EMBEDDING_API_BASE ?? 'http://embedding:8000/v1',
+    apiKey: process.env.EMBEDDING_API_KEY ?? '--',
+    modelName: process.env.EMBEDDING_MODEL ?? '/models/Qwen3-Embedding-0.6B-f16.gguf',
 });
 ```
 
-即调用 llama.cpp 容器提供的 OpenAI 兼容 `/v1/embeddings` 接口。
+即调用 OpenAI 兼容 `/v1/embeddings` 接口。默认指向 llama.cpp `embedding` 容器；三个环境变量（`EMBEDDING_API_BASE` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL`）均可在部署时覆盖，将嵌入服务指到远程或云端（见 `docker-compose.external-embedding.yml`）。
 
 ### 检索（`Novel.search`）
 
