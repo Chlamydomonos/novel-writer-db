@@ -1,12 +1,12 @@
 /**
- * `/api/novels/:novelId/{read,write,edit,search,documents}` 路由实现。
+ * `/api/novels/:novelId/{read,write,edit,search,move,documents}` 路由实现。
  *
- * 覆盖 `Novel.read/write/edit/search/deleteDocument`。
+ * 覆盖 `Novel.read/write/edit/search/moveDocument/deleteDocument`。
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DocumentRef, ReadResponse, SearchResponse } from '@novel-writer/shared';
-import { editDocumentSchema, readSchema, searchSchema, writeDocumentSchema } from '../schemas.js';
+import { editDocumentSchema, moveDocumentSchema, readSchema, searchSchema, writeDocumentSchema } from '../schemas.js';
 import { loadNovelOrError } from './novels.js';
 
 export async function registerDocumentRoutes(app: FastifyInstance) {
@@ -59,6 +59,18 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         }
         const { rootCategory, texts, limit } = parsed.data;
         return await request.novel!.search(rootCategory, texts, limit);
+    });
+
+    // -----------------------------------------------------------------------
+    // 移动（含重命名）文档：自动改写指向旧路径的链接，链接记录同步维护
+    // -----------------------------------------------------------------------
+    app.post('/api/novels/:novelId/move', { ...withNovel }, async (request, reply) => {
+        const parsed = moveDocumentSchema.safeParse(request.body);
+        if (!parsed.success) {
+            return reply.code(400).send({ error: { type: 'InvalidPathError', message: parsed.error.message } });
+        }
+        await request.novel!.moveDocument(parsed.data.path, parsed.data.to);
+        return reply.code(204).send();
     });
 
     // -----------------------------------------------------------------------

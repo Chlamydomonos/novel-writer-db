@@ -2,6 +2,7 @@ import Sequelize from '@sequelize/core';
 import { SqliteDialect } from '@sequelize/sqlite3';
 import { Category } from './models/category.js';
 import { Document } from './models/document.js';
+import { DocumentLink } from './models/document-link.js';
 import { Experiment } from './models/experiment.js';
 import { Novel } from './models/novel.js';
 
@@ -14,7 +15,7 @@ const createSequelize = async () => {
         define: {
             timestamps: false,
         },
-        models: [Category, Document, Experiment, Novel],
+        models: [Category, Document, DocumentLink, Experiment, Novel],
         pool: {
             max: 1,
             min: 1,

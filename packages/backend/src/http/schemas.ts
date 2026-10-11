@@ -80,6 +80,13 @@ export const editDocumentSchema = z.object({
     flags: z.string().optional(),
 });
 
+export const moveDocumentSchema = z.object({
+    /** 源文档绝对路径。 */
+    path: absolutePath,
+    /** 目标文档绝对路径（换目录/改名）。 */
+    to: absolutePath,
+});
+
 export const searchSchema = z.object({
     rootCategory: z.enum(ROOT_CATEGORY_NAMES),
     texts: z.array(z.string()).min(1),

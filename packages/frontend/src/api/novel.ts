@@ -6,6 +6,7 @@ import type {
     ListQuery,
     ListResponse,
     ListTextResponse,
+    MoveDocumentRequest,
     NovelDetail,
     NovelSummary,
     PatchNovelRequest,
@@ -50,6 +51,10 @@ export const writeDocument = (novelId: number, payload: WriteDocumentRequest) =>
 
 export const editDocument = (novelId: number, payload: EditDocumentRequest) =>
     http.post<unknown, void>(`/novels/${novelId}/edit`, payload);
+
+/** 移动（含重命名）文档；后端会自动改写所有指向旧路径的 Markdown 链接。 */
+export const moveDocument = (novelId: number, payload: MoveDocumentRequest) =>
+    http.post<unknown, void>(`/novels/${novelId}/move`, payload);
 
 export const searchDocuments = (novelId: number, payload: SearchRequest) =>
     http.post<unknown, SearchResponse>(`/novels/${novelId}/search`, payload);

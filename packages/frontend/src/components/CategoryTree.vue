@@ -4,12 +4,45 @@
 // 使用节点后的操作按钮管理目录与文档（无右键菜单）。
 
 import { ref, computed, watch, nextTick } from 'vue';
-import { ElTree, ElRadioGroup, ElRadio, ElButton, ElIcon, ElInput, ElScrollbar, ElMessageBox } from 'element-plus';
-import { Folder, Document, FolderAdd, DocumentAdd, Edit, Delete, Check, Close, Refresh } from '@element-plus/icons-vue';
+import {
+    ElTree,
+    ElRadioGroup,
+    ElRadio,
+    ElButton,
+    ElIcon,
+    ElInput,
+    ElScrollbar,
+    ElMessageBox,
+    ElDialog,
+    ElCascader,
+    ElMessage,
+} from 'element-plus';
+import {
+    Folder,
+    Document,
+    FolderAdd,
+    DocumentAdd,
+    Edit,
+    Delete,
+    Check,
+    Close,
+    Refresh,
+    Position,
+} from '@element-plus/icons-vue';
 import { useNovelsStore } from '@/stores/novels';
 import { useEditorStore } from '@/stores/editor';
-import { listTree, readDocuments, writeDocument, deleteDocument, deleteCategory, createCategory } from '@/api/novel';
-import type { RootCategoryName, TreeNode } from '@novel-writer/shared';
+import {
+    listTree,
+    readDocuments,
+    writeDocument,
+    deleteDocument,
+    deleteCategory,
+    createCategory,
+    moveDocument,
+} from '@/api/novel';
+import { ApiError } from '@/api/client';
+import { ROOT_CATEGORY_NAMES, type RootCategoryName, type TreeNode } from '@novel-writer/shared';
+import type { CascaderOption, CascaderValue } from 'element-plus/es/components/cascader-panel/src/types';
 import type Node from 'element-plus/es/components/tree/src/model/node';
 
 // ===========================================================================
@@ -271,6 +304,101 @@ function cancelAdd() {
 }
 
 // ===========================================================================
+// 移动文档（级联懒加载选择目标目录；后端会自动改写指向旧路径的链接）
+// ===========================================================================
+const moveVisible = ref(false);
+const moveSubmitting = ref(false);
+const moveTarget = ref<TreeNodeData | null>(null);
+/** 级联选择路径数组，如 ['/设定', '/设定/番外']，末项即目标目录的完整路径。 */
+const movePaths = ref<string[]>([]);
+
+const moveCascaderProps = {
+    lazy: true,
+    checkStrictly: true,
+    lazyLoad: async (node: unknown, resolve: (options?: CascaderOption[]) => void) => {
+        const n = node as { level: number; value?: string };
+        const novelId = novelsStore.currentId;
+
+        if (n.level === 0) {
+            // 第一层：三个根目录
+            resolve(ROOT_CATEGORY_NAMES.map((name) => ({ value: `/${name}`, label: name, leaf: false })));
+        } else if (n.value && novelId !== null) {
+            // 更深层：懒加载真实子目录（仅保留目录类型）
+            const dir = n.value;
+            const nodes = await listTree(novelId, dir).catch(() => [] as TreeNode[]);
+            resolve(
+                nodes
+                    .filter((m) => m.type === 'category')
+                    .map((m) => ({ value: `${dir}/${m.name}`, label: m.name, leaf: false })),
+            );
+        } else {
+            resolve([]);
+        }
+    },
+};
+
+/** 预览目标完整路径（已选定目录时）。 */
+const movePreview = computed(() => {
+    const dir = movePaths.value.at(-1);
+    if (!moveTarget.value || !dir) return null;
+    return `${dir}/${moveTarget.value.name}`;
+});
+
+function onMovePathsChange(value: CascaderValue | null | undefined) {
+    movePaths.value = Array.isArray(value) ? value.map(String) : value == null ? [] : [String(value)];
+}
+
+function startMove(data: TreeNodeData) {
+    moveTarget.value = data;
+    movePaths.value = [];
+    moveVisible.value = true;
+}
+
+async function confirmMove() {
+    const target = moveTarget.value;
+    const dir = movePaths.value.at(-1);
+    const novelId = novelsStore.currentId;
+    if (!target || !dir || novelId === null) return;
+
+    const to = `${dir}/${target.name}`;
+    if (to === target.path) {
+        ElMessage.warning('目标路径与源路径相同');
+        return;
+    }
+
+    moveSubmitting.value = true;
+    try {
+        await moveDocument(novelId, { path: target.path, to });
+        ElMessage.success(`已移动到 ${to}`);
+        moveVisible.value = false;
+
+        // 若该文档正在编辑器中打开：移动可能改写了其自身相对链接，重新读取正文
+        if (editorStore.currentPath === target.path) {
+            try {
+                const docs = await readDocuments(novelId, [to]);
+                const doc = docs[0];
+                if (doc) editorStore.openDocument(doc);
+                else editorStore.closeDocument();
+            } catch {
+                editorStore.closeDocument();
+            }
+        }
+
+        await refreshAll();
+    } catch (e) {
+        if (e instanceof ApiError && e.type === 'ExistError') {
+            ElMessage.error('目标位置已存在同名文档');
+        } else if (e instanceof ApiError && e.type === 'InvalidPathError') {
+            ElMessage.error('路径无效');
+        } else {
+            ElMessage.error('移动失败，请稍后重试。');
+        }
+    } finally {
+        moveSubmitting.value = false;
+    }
+}
+
+// ===========================================================================
 // 删除
 // ===========================================================================
 async function handleDelete(data: TreeNodeData) {
@@ -372,6 +500,7 @@ watch(
                             </template>
                             <template v-else>
                                 <ElButton link :icon="Edit" title="打开编辑" @click.stop="openDocument(data)" />
+                                <ElButton link :icon="Position" title="移动" @click.stop="startMove(data)" />
                             </template>
                             <ElButton link :icon="Delete" title="删除" @click.stop="handleDelete(data)" />
                         </span>
@@ -392,6 +521,35 @@ watch(
             <ElButton :icon="Check" size="small" circle @click="confirmAdd" />
             <ElButton :icon="Close" size="small" circle @click="cancelAdd" />
         </div>
+
+        <!-- 移动文档对话框 -->
+        <ElDialog v-model="moveVisible" title="移动文档" width="420px" :close-on-click-modal="!moveSubmitting">
+            <div class="move-body">
+                <div class="move-row">
+                    <span class="move-label">源文档：</span>
+                    <span class="move-value">{{ moveTarget?.path }}</span>
+                </div>
+                <ElCascader
+                    :model-value="movePaths"
+                    class="move-cascader"
+                    placeholder="选择目标目录"
+                    :props="moveCascaderProps"
+                    @update:model-value="onMovePathsChange"
+                />
+                <div class="move-row">
+                    <span class="move-label">目标路径：</span>
+                    <span class="move-value" :class="{ 'is-ready': movePreview }">
+                        {{ movePreview ?? '（尚未选择目标目录）' }}
+                    </span>
+                </div>
+            </div>
+            <template #footer>
+                <ElButton :disabled="moveSubmitting" @click="moveVisible = false">取消</ElButton>
+                <ElButton type="primary" :loading="moveSubmitting" :disabled="!movePreview" @click="confirmMove">
+                    移动
+                </ElButton>
+            </template>
+        </ElDialog>
     </div>
 </template>
 
@@ -458,5 +616,38 @@ watch(
     gap: 4px;
     flex-shrink: 0;
     border-top: 1px solid var(--el-border-color-light);
+}
+
+.move-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.move-row {
+    display: flex;
+    gap: 8px;
+    font-size: 13px;
+    line-height: 24px;
+
+    .move-label {
+        flex-shrink: 0;
+        color: var(--el-text-color-secondary);
+    }
+
+    .move-value {
+        flex: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+        color: var(--el-text-color-secondary);
+
+        &.is-ready {
+            color: var(--el-text-color-primary);
+        }
+    }
+}
+
+.move-cascader {
+    width: 100%;
 }
 </style>

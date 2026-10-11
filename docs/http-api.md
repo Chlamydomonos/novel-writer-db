@@ -28,6 +28,7 @@
 | `POST`   | `/api/novels/:novelId/read`       | `read`                              | 批量读取文档                 |
 | `POST`   | `/api/novels/:novelId/write`      | `write`                             | 写入（覆盖）文档             |
 | `POST`   | `/api/novels/:novelId/edit`       | `edit`                              | 正则替换编辑文档             |
+| `POST`   | `/api/novels/:novelId/move`       | `moveDocument`                      | 移动（重命名）并改写相关链接 |
 | `POST`   | `/api/novels/:novelId/search`     | `search`                            | 语义检索                     |
 | `DELETE` | `/api/novels/:novelId/documents`  | `deleteDocument`                    | 删除文档                     |
 | `DELETE` | `/api/novels/:novelId/categories` | `deleteCategory`                    | 删除目录                     |
@@ -206,6 +207,8 @@ Content-Type: application/json
 
 响应：`204 No Content`。自动创建中间目录，但**禁止写入根目录本身**（路径必须 `splitted.length >= 2`）。
 
+> 写入（含编辑）时后端会自动解析正文中的 Markdown 链接（仅保留指向真实存在的 `.md` 文件的链接）并存入 `DocumentLink`，供移动/删除文档时维护。
+
 ### 正则编辑文档
 
 ```
@@ -221,6 +224,25 @@ Content-Type: application/json
 ```
 
 响应：`204 No Content`；若替换前后无变化则按 `EditFailError` 返回 `422`。
+
+### 移动文档（含重命名）
+
+```
+POST /api/novels/:novelId/move
+Content-Type: application/json
+
+{
+  "path": "/正文/序章.md",
+  "to": "/正文/卷一/序章.md"
+}
+```
+
+- `path`：源文档绝对路径（`.md`）；`to`：目标文档绝对路径（`.md`），中间目录不存在时自动创建。
+- 目标位置已有同名文档 → `ExistError`（409）；`path === to` → `InvalidPathError`（400）。
+
+响应：`204 No Content`。
+
+**链接自动改写**：所有指向 `path` 的 Markdown 链接会被改写为指向 `to` —— 绝对链接直接换成新路径，相对链接按目标文档所在目录重新计算相对路径；相关文档正文同步重新嵌入向量库，链接记录全量重建。被移动文档自身的相对链接也会按新目录重新表达。
 
 ### 语义检索
 
@@ -247,7 +269,7 @@ Content-Type: application/json
 DELETE /api/novels/:novelId/documents?path=/正文/序章.md
 ```
 
-响应：`204 No Content`。
+响应：`204 No Content`。删除后，指向该文档的所有链接记录目标会被改写为 `'deleted'`（正文不改写）。
 
 ### 删除目录
 

@@ -66,7 +66,7 @@ function okResult(payload: unknown): CallToolResult {
 // ===========================================================================
 
 /**
- * 在给定的 `McpServer` 上注册全部 10 个"暴露给 LLM"的工具。
+ * 在给定的 `McpServer` 上注册全部 11 个"暴露给 LLM"的工具。
  *
  * @param server 待注册工具的 MCP server（由 `buildMcpServer` 创建）
  */
@@ -232,6 +232,8 @@ export function registerNovelTools(server: McpServer): void {
                 '整体覆盖或创建一个 `.md` 文档；中间目录会自动创建。' +
                 '`path` 为绝对路径，必须以 `.md` 结尾，且路径项数不小于 2（如 `/设定/人物.md`）——' +
                 '该限制用于阻止形如 `/xxx.md` 的访问；对形如 `/设定/xxx.md` 的访问没有限制。' +
+                '保存后系统会自动解析正文中的 Markdown 链接（仅保留指向真实存在的 `.md` 文件的链接），' +
+                '并把链接关系存入数据库供移动/删除文档时维护。' +
                 '成功返回 `{ ok: true }`。',
             inputSchema: z.object({
                 path: PathField.describe('绝对文件路径，必须以 `.md` 结尾'),
@@ -250,13 +252,41 @@ export function registerNovelTools(server: McpServer): void {
     );
 
     // -----------------------------------------------------------------------
+    // move_document —— 移动（含重命名）一个 .md 文档，自动改写指向它的链接
+    // -----------------------------------------------------------------------
+    server.registerTool(
+        'move_document',
+        {
+            description:
+                '将一个 `.md` 文档移动到新路径（可同时换目录与改名）；目标中间目录不存在时自动创建。' +
+                '移动后系统会自动把所有指向旧路径的 Markdown 链接改指新位置' +
+                '（相关文档正文同步重写并重新嵌入），链接记录与新正文保持一致。' +
+                '若目标位置已有同名文档，返回 ExistError。' +
+                '成功返回 `{ ok: true, from, to, updatedLinks }`，其中 `updatedLinks` 为被改写的链接数。',
+            inputSchema: z.object({
+                path: PathField.describe('源文档绝对路径，必须以 `.md` 结尾'),
+                to: PathField.describe('目标文档绝对路径，必须以 `.md` 结尾'),
+            }),
+        },
+        async ({ path, to }, ctx) => {
+            try {
+                const novel = await getNovelFromHeaders(ctx.http?.req?.headers);
+                const result = await novel.moveDocument(path, to);
+                return okResult({ ok: true, ...result });
+            } catch (err) {
+                return errorResult(err);
+            }
+        },
+    );
+
+    // -----------------------------------------------------------------------
     // edit_document —— 正则替换编辑指定文档
     // -----------------------------------------------------------------------
     server.registerTool(
         'edit_document',
         {
             description:
-                '正则替换编辑指定文档：读取 → 替换 → 整体写回。' +
+                '正则替换编辑指定文档：读取 → 替换 → 整体写回（写回时自动重解析并维护文档内的 Markdown 链接）。' +
                 '若替换前后无变化，返回 EditFailError（isError），可用于判断是否需调整正则。' +
                 '成功返回 `{ ok: true }`。',
             inputSchema: z.object({
@@ -283,7 +313,10 @@ export function registerNovelTools(server: McpServer): void {
     server.registerTool(
         'delete_document',
         {
-            description: '删除一个 `.md` 文档。`path` 为绝对文件路径。成功返回 `{ ok: true }`。',
+            description:
+                '删除一个 `.md` 文档。`path` 为绝对文件路径。' +
+                '删除后，所有指向该文档的链接记录的目标会被改写为 `deleted`。' +
+                '成功返回 `{ ok: true }`。',
             inputSchema: z.object({
                 path: PathField.describe('绝对文件路径，必须以 `.md` 结尾'),
             }),

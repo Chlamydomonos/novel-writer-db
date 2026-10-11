@@ -56,6 +56,7 @@ v2 把 handler 第二参数从 `extra` 改名为 `ctx`，且 `extra.requestInfo?
 | `search(rootCategory, texts, limit)` | `search`          | 语义检索             |
 | `write(path, text)`                  | `write_document`  | 写文档（创建/覆盖）  |
 | `edit(path, regex, replace, flags)`  | `edit_document`   | 正则替换编辑文档     |
+| `moveDocument(from, to)`             | `move_document`   | 移动文档并改写链接   |
 | `deleteDocument(path)`               | `delete_document` | 删除文档             |
 | `deleteCategory(path)`               | `delete_category` | 删除目录（非根）     |
 
@@ -145,11 +146,11 @@ v2 把 handler 第二参数从 `extra` 改名为 `ctx`，且 `extra.requestInfo?
 | `path` | string | 绝对文件路径 |
 | `text` | string | 完整正文     |
 
-返回：成功 `{ ok: true }` 或空。
+返回：成功 `{ ok: true }` 或空。写入后自动解析正文中的 Markdown 链接（仅保留指向真实存在的 `.md` 文件的链接）并存入 `DocumentLink`。
 
 ### `edit_document`
 
-正则替换编辑指定文档。
+正则替换编辑指定文档（读取 → 替换 → 写回；写回时自动重解析并维护链接）。
 
 | 入参      | 类型    | 说明         |
 | --------- | ------- | ------------ |
@@ -160,9 +161,20 @@ v2 把 handler 第二参数从 `extra` 改名为 `ctx`，且 `extra.requestInfo?
 
 返回：成功空；无变化抛 `EditFailError`。
 
+### `move_document`
+
+移动（含重命名）一个 `.md` 文档；目标中间目录不存在时自动创建。自动把所有指向旧路径的 Markdown 链接改指新位置（相关文档正文同步重写并重新嵌入），链接记录与新正文保持一致。
+
+| 入参   | 类型   | 说明             |
+| ------ | ------ | ---------------- |
+| `path` | string | 源文档绝对路径   |
+| `to`   | string | 目标文档绝对路径 |
+
+返回：成功 `{ ok: true, from, to, updatedLinks }`；目标位置已有同名文档抛 `ExistError`。
+
 ### `delete_document`
 
-删除一个 `.md` 文档。
+删除一个 `.md` 文档。删除后，指向该文档的所有链接记录目标会被改写为 `'deleted'`（正文不改写）。
 
 | 入参   | 类型   | 说明         |
 | ------ | ------ | ------------ |
@@ -281,6 +293,7 @@ path 必须为绝对路径（如 `/设定`）。recursive 为 true 时向下递�
 | `search`          | `POST /api/novels/:id/search`                    |            |
 | `write_document`  | `POST /api/novels/:id/write`                     |            |
 | `edit_document`   | `POST /api/novels/:id/edit`                      |            |
+| `move_document`   | `POST /api/novels/:id/move`                      |            |
 | `delete_document` | `DELETE /api/novels/:id/documents`               |            |
 | `delete_category` | `DELETE /api/novels/:id/categories`              |            |
 | `write_info`      | `PATCH /api/novels/:id` (body.info)              |            |

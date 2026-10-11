@@ -1,12 +1,14 @@
-import { Op } from '@sequelize/core';
-import { ROOT_CATEGORY_NAMES, type RootCategoryName } from '@novel-writer/shared';
+import { Op, type Transaction } from '@sequelize/core';
+import { DELETED_LINK_TARGET, ROOT_CATEGORY_NAMES, type RootCategoryName } from '@novel-writer/shared';
 import { getChroma } from './db/chroma.js';
 import { embeddingFunction } from './db/embedding.js';
 import { Category } from './db/models/category.js';
 import { Document } from './db/models/document.js';
+import { DocumentLink } from './db/models/document-link.js';
 import { Novel as NovelModel } from './db/models/novel.js';
 import { getDB } from './db/sequelize.js';
 import { EditFailError, ExistError, InvalidPathError, NotExistError, OutOfBoundsError } from './errors.js';
+import { collectLinkMatches, isDocumentPath, relativeHrefFrom, resolveLinkPath, rewriteTextLinks } from './links.js';
 
 // 从 @novel-writer/shared 再导出，便于现有 `import { RootCategoryName } from '../lib/novel.js'` 调用方继续工作。
 export type { RootCategoryName } from '@novel-writer/shared';
@@ -109,6 +111,110 @@ export class Novel {
         }
 
         return { rootId: rootId!, id: currentId! };
+    }
+
+    // ===========================================================================
+    // 文档路径解析与 Markdown 链接维护（私有辅助）
+    // ===========================================================================
+
+    // 解析并校验 `.md` 文档路径（供写入/移动/删除等操作复用）。
+    private parseDocumentPath(path: string, action: string) {
+        if (!path.startsWith('/')) {
+            throw new InvalidPathError('路径必须为绝对路径');
+        }
+
+        const splitted = path.split('/').filter((p) => p.length > 0);
+        if (splitted.length < 2) {
+            throw new InvalidPathError(`无效的路径: ${path}`);
+        }
+
+        const dirNames = splitted.slice(0, -1);
+        const name = splitted.at(-1)!;
+        if (!name.endsWith('.md')) {
+            throw new InvalidPathError(`只能${action}\`.md\`文件`);
+        }
+
+        return { dirNames, dirPath: '/' + dirNames.join('/'), name };
+    }
+
+    // 宽容地检查"某绝对路径对应的文档是否真实存在"：
+    // 目录链或文档不存在时静默返回 false（与会抛错的 findCategory 不同），供链接解析使用。
+    private async linkTargetExists(target: string, transaction: Transaction) {
+        if (!isDocumentPath(target)) {
+            return false;
+        }
+
+        const parts = target.split('/').filter((p) => p.length > 0);
+        const name = parts.at(-1)!;
+
+        let currentId: number | undefined = undefined;
+        for (let i = 0; i < parts.length - 1; i++) {
+            const dirName = parts[i]!;
+            let model: Category | null;
+            if (currentId === undefined) {
+                model = await Category.findOne({ where: { novelId: this.id, name: dirName }, transaction });
+            } else {
+                model = await Category.findOne({ where: { parentId: currentId, name: dirName }, transaction });
+            }
+            if (!model) {
+                return false;
+            }
+            currentId = model.id;
+        }
+
+        const document = await Document.findOne({ where: { categoryId: currentId!, name }, transaction });
+        return document !== null;
+    }
+
+    // 解析文档正文中的 Markdown 链接，整体替换该文档的链接记录（DocumentLink）。
+    //
+    // 解析规则：行内链接 `[文本](目标)`（含图片 `![替代](目标)`）；
+    // 仅保留**指向 `.md` 文件且目标文档真实存在**的链接，其余（外部 URL、锚点、
+    // 不存在的相对路径等）一律忽略。相对路径以源文档所在目录 `sourceDir` 为基准解析。
+    // 同一目标多次出现时去重存储。
+    private async syncDocumentLinks(documentId: number, sourceDir: string, text: string, transaction: Transaction) {
+        const targets = new Set<string>();
+        for (const match of collectLinkMatches(text)) {
+            if (match.path === null) {
+                continue;
+            }
+            const absolute = resolveLinkPath(match.path, sourceDir);
+            if (absolute === null || !isDocumentPath(absolute)) {
+                continue;
+            }
+            if (targets.has(absolute)) {
+                continue;
+            }
+            if (await this.linkTargetExists(absolute, transaction)) {
+                targets.add(absolute);
+            }
+        }
+
+        await DocumentLink.destroy({ where: { documentId }, transaction });
+        if (targets.size > 0) {
+            await DocumentLink.bulkCreate(
+                [...targets].map((target) => ({ documentId, target })),
+                { transaction },
+            );
+        }
+    }
+
+    // 找到某个 Category 所属根目录（拥有 `novelId` 的那条 Category）的 ID。
+    private async findRootCategoryId(categoryId: number) {
+        let currentId: number | undefined = categoryId;
+        for (;;) {
+            const model: Category | null = await Category.findByPk(currentId);
+            if (!model) {
+                throw new Error('查找根目录时发生未知错误');
+            }
+            if (model.novelId != null) {
+                return model.id;
+            }
+            if (model.parentId == null) {
+                throw new Error('查找根目录时发生未知错误');
+            }
+            currentId = model.parentId;
+        }
     }
 
     // 重命名小说。该接口不暴露给LLM
@@ -461,6 +567,11 @@ export class Novel {
             if (!model) {
                 model = await Document.create({ categoryId: currentCategoryId!, name }, { transaction });
             }
+
+            // 自动解析正文中的 Markdown 链接并更新链接记录
+            // （创建/编辑共用此入口：正则编辑 edit() 也经由 write 写回）。
+            await this.syncDocumentLinks(model.id, '/' + categoryNames.join('/'), text, transaction);
+
             return { documentId: model.id, rootCategoryId: rootCategoryId! };
         });
 
@@ -469,6 +580,166 @@ export class Novel {
         await collection.upsert({ ids: [documentId.toString()], documents: [text] });
 
         return { documentId };
+    }
+
+    // ===========================================================================
+    // 移动文档（含重命名）：自动把指向旧路径的链接改指新位置
+    // ===========================================================================
+
+    // 将文档从 `from` 移动到 `to`（可同时换目录与改名），目标目录不存在时自动创建。
+    // 同一事务内完成：目标目录创建 → 重名检查 → 入链正文重写 → 文档行更新 → 链接记录同步；
+    // 事务提交后再迁移 ChromaDB 向量并重嵌入被改写正文的文档。
+    // 返回被改写指向新位置的链接记录数。该接口暴露给 LLM（MCP `move_document`）。
+    async moveDocument(from: string, to: string): Promise<{ from: string; to: string; updatedLinks: number }> {
+        if (from === to) {
+            throw new InvalidPathError('源路径与目标路径相同');
+        }
+
+        const src = this.parseDocumentPath(from, '移动');
+        const dst = this.parseDocumentPath(to, '移动');
+
+        const { id: srcCategoryId, rootId: srcRootId } = await this.findCategory(src.dirPath);
+        const srcDoc = await Document.findOne({ where: { categoryId: srcCategoryId, name: src.name } });
+        if (!srcDoc) {
+            throw new NotExistError(`文档\`${from}\`不存在`);
+        }
+        const documentId = srcDoc.id;
+
+        // 取旧正文（自身相对链接换算、自链接重写都需要）。
+        const chroma = await getChroma();
+        const oldCollection = await chroma.getCollection({ name: `category_${srcRootId}`, embeddingFunction });
+        const oldDoc = (await oldCollection.get({ ids: [documentId.toString()] })).documents[0];
+        const oldText = typeof oldDoc === 'string' ? oldDoc : '';
+        const hasVector = typeof oldDoc === 'string';
+
+        const db = await getDB();
+        const { dstDirPath, dstRootId, selfText, rewrites, updatedLinks } = await db.transaction(
+            async (transaction) => {
+                // 1) 逐级查找/创建目标目录链（根目录必须已存在，语义与 write 一致）
+                let currentCategoryId: number | undefined = undefined;
+                let rootCategoryId: number | undefined = undefined;
+                for (const dirName of dst.dirNames) {
+                    let model: Category | null;
+                    if (currentCategoryId === undefined) {
+                        model = await Category.findOne({ where: { novelId: this.id, name: dirName }, transaction });
+                        if (!model) {
+                            throw new InvalidPathError(`根目录\`${dirName}\`不存在`);
+                        }
+                        rootCategoryId = model.id;
+                    } else {
+                        model = await Category.findOne({
+                            where: { parentId: currentCategoryId, name: dirName },
+                            transaction,
+                        });
+                        if (!model) {
+                            model = await Category.create(
+                                { parentId: currentCategoryId, name: dirName },
+                                { transaction },
+                            );
+                        }
+                    }
+                    currentCategoryId = model.id;
+                }
+                const dstDirPath = '/' + dst.dirNames.join('/');
+
+                // 2) 重名检查（源文档自身即将离开原位置，不影响目标位置的重名判定）
+                const existing = await Document.findOne({
+                    where: { categoryId: currentCategoryId!, name: dst.name },
+                    transaction,
+                });
+                if (existing) {
+                    throw new ExistError(`文档\`${to}\`已存在`);
+                }
+
+                // 3) 汇总所有指向旧路径的入链记录，按源文档去重
+                const inboundLinks = await DocumentLink.findAll({ where: { target: from }, transaction });
+                const updatedLinks = inboundLinks.length;
+                const inboundDocIds = [...new Set(inboundLinks.map((l) => l.documentId))];
+
+                // 4) 重写各入链文档的正文（源文档自身指向旧路径的自链接由下一步统一处理）
+                const rewrites: { documentId: number; rootId: number; text: string }[] = [];
+                for (const inboundDocId of inboundDocIds) {
+                    if (inboundDocId === documentId) {
+                        continue; // 自链接在自身重写中处理，避免双重改写
+                    }
+                    const doc = await Document.findByPk(inboundDocId, { transaction });
+                    if (!doc) {
+                        continue;
+                    }
+                    const dirPath = await this.getCategoryPath(doc.categoryId);
+                    const rootId = await this.findRootCategoryId(doc.categoryId);
+
+                    const collection = await chroma.getCollection({ name: `category_${rootId}`, embeddingFunction });
+                    const text = (await collection.get({ ids: [inboundDocId.toString()] })).documents[0] ?? '';
+
+                    const newText = rewriteTextLinks(text, (target, kind) => {
+                        if (target !== from) {
+                            return null;
+                        }
+                        // 绝对写法直接换新绝对路径；相对写法换算成相对新位置的相对路径，保留原风格
+                        return kind === 'absolute' ? to : relativeHrefFrom(dirPath, to);
+                    });
+                    if (newText !== text) {
+                        rewrites.push({ documentId: inboundDocId, rootId, text: newText });
+                    }
+                }
+
+                // 5) 重写自身正文：指向旧路径的链接（自链接）改指新位置；
+                //    其余相对链接换算成相对新目录的写法，保证解析结果（绝对目标）不变。
+                const selfText = rewriteTextLinks(oldText, (target, kind) => {
+                    if (target === from) {
+                        return kind === 'absolute' ? to : relativeHrefFrom(dstDirPath, to);
+                    }
+                    if (kind === 'relative') {
+                        return relativeHrefFrom(dstDirPath, target);
+                    }
+                    return null; // 绝对链接且指向其他文档：保持不变
+                });
+
+                // 6) 更新文档行（先于链接同步：sync 校验 `to` 存在性时需要新位置已就位）
+                const model = await Document.findByPk(documentId, { transaction });
+                if (!model) {
+                    throw new Error('移动文档时发生未知错误');
+                }
+                model.categoryId = currentCategoryId!;
+                model.name = dst.name;
+                await model.save({ transaction });
+
+                // 7) 同步自身与各入链文档的链接记录
+                await this.syncDocumentLinks(documentId, dstDirPath, selfText, transaction);
+                for (const r of rewrites) {
+                    // 入链文档自身的目录未变，以其所在目录为基准重解析
+                    const doc = await Document.findByPk(r.documentId, { transaction });
+                    if (!doc) {
+                        continue;
+                    }
+                    const dirPath = await this.getCategoryPath(doc.categoryId);
+                    await this.syncDocumentLinks(r.documentId, dirPath, r.text, transaction);
+                }
+
+                return {
+                    dstDirPath,
+                    dstRootId: rootCategoryId!,
+                    selfText,
+                    rewrites,
+                    updatedLinks,
+                };
+            },
+        );
+
+        // 事务提交后：迁移 ChromaDB（正文不在 Sequelize 中，不参与事务）。
+        // 被移动文档先从旧 collection 删除，再写入新 collection；正文被改写的入链文档重嵌入。
+        if (hasVector) {
+            await oldCollection.delete({ ids: [documentId.toString()] });
+            const newCollection = await chroma.getCollection({ name: `category_${dstRootId}`, embeddingFunction });
+            await newCollection.upsert({ ids: [documentId.toString()], documents: [selfText] });
+        }
+        for (const r of rewrites) {
+            const collection = await chroma.getCollection({ name: `category_${r.rootId}`, embeddingFunction });
+            await collection.upsert({ ids: [r.documentId.toString()], documents: [r.text] });
+        }
+
+        return { from, to, updatedLinks };
     }
 
     // 创建空目录，支持自动创建中间目录
@@ -555,12 +826,18 @@ export class Novel {
 
         const db = await getDB();
         const documentId = await db.transaction(async (transaction) => {
-            const document = await Document.findOne({ where: { categoryId, name } });
+            const document = await Document.findOne({ where: { categoryId, name }, transaction });
             if (!document) {
                 throw new InvalidPathError(`文档\`${path}\`不存在`);
             }
 
             const documentId = document.id;
+
+            // 链接维护：清理该文档自身的出链；把所有指向它的链接记录目标改写为 'deleted'。
+            // （不重写引用文档的正文：正文里的链接下次编辑时按解析规则自然失效。）
+            await DocumentLink.destroy({ where: { documentId }, transaction });
+            await DocumentLink.update({ target: DELETED_LINK_TARGET }, { where: { target: path }, transaction });
+
             await document.destroy({ transaction });
             return documentId;
         });
@@ -594,11 +871,31 @@ export class Novel {
         };
         await findFiles(id);
 
+        // 收集将被删除的文档的绝对路径，用于把指向它们的链接记录目标改写为 'deleted'
+        const documentPaths: string[] = [];
+        for (const documentId of documentIds) {
+            const model = await Document.findByPk(documentId);
+            if (model) {
+                documentPaths.push(`${await this.getCategoryPath(model.categoryId)}/${model.name}`);
+            }
+        }
+
         const db = await getDB();
         const chroma = await getChroma();
         const collection = await chroma.getCollection({ name: `category_${rootId}`, embeddingFunction });
 
         await db.transaction(async (transaction) => {
+            // 链接维护：清理被删文档自身的出链；指向它们的入链目标改写为 'deleted'（语义与 deleteDocument 一致）
+            if (documentIds.length > 0) {
+                await DocumentLink.destroy({ where: { documentId: { [Op.in]: documentIds } }, transaction });
+            }
+            if (documentPaths.length > 0) {
+                await DocumentLink.update(
+                    { target: DELETED_LINK_TARGET },
+                    { where: { target: { [Op.in]: documentPaths } }, transaction },
+                );
+            }
+
             await Document.destroy({ where: { id: { [Op.in]: documentIds } }, transaction });
             await Category.destroy({ where: { id }, transaction });
         });

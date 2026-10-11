@@ -48,6 +48,27 @@
 
 > 文档**正文不存表**——只存元数据。正文与向量统一存放在 ChromaDB（见下文）。
 
+### `DocumentLink`（`models/document-link.ts`）
+
+文档的**出链**记录（该文档正文中解析出的 Markdown 链接）。每次写入/编辑文档时由 `Novel.syncDocumentLinks` 按新正文全量重建（`destroy` + `bulkCreate`）。
+
+| 字段         | 类型    | 约束               | 说明                                                       |
+| ------------ | ------- | ------------------ | ---------------------------------------------------------- |
+| `id`         | INTEGER | PK, AUTO_INCREMENT |                                                            |
+| `documentId` | INTEGER | NOT NULL, FK       | 出链所属文档，指向被移动/删除时级联清理                    |
+| `target`     | STRING  | NOT NULL           | 目标文档的**绝对路径**；源文档删除后该值改写为 `'deleted'` |
+
+关系：
+
+- `BelongsTo(Document)`（外键 `documentId` `ON DELETE CASCADE`，反向 `Document.links`）
+
+约定与语义：
+
+- **解析规则**：只解析指向 `.md` 文件的链接，且目标文档在数据库中真实存在时才入库；外链、锚点、图片、引用式链接、不存在的目标一律忽略。
+- **去重**：同一文档指向同一目标的链接只保留一条记录（业务层 Set 去重，无数据库唯一约束）。
+- **`'deleted'`**：常量导出自 `@novel-writer/shared`（`DELETED_LINK_TARGET`）。删除文档时，指向它的所有记录目标改为 `'deleted'` 而不是直接删除——正文中的链接文本保持原样，后续编辑时按解析规则自然失效。
+- **移动文档**：`Novel.moveDocument` 会改写引用文档的**正文**（绝对链接重写为新路径，相对链接保持相对语义），并同步重建相关文档的链接记录。
+
 ### 根 Category 的初始化
 
 `Novel.create()` 在事务中创建 Novel 后立即创建三条根 Category：
