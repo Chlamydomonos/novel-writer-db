@@ -3,6 +3,7 @@ import type {
     CreateCategoryRequest,
     CreateNovelRequest,
     EditDocumentRequest,
+    ImportNovelAccepted,
     ListQuery,
     ListResponse,
     ListTextResponse,
@@ -67,4 +68,30 @@ export const deleteDocument = (novelId: number, path: string) =>
 export const deleteCategory = (novelId: number, path: string) =>
     http.delete<unknown, void>(`/novels/${novelId}/categories`, {
         params: { path },
+    });
+
+// ===========================================================================
+// 归档（导出 / 导入）
+// ===========================================================================
+
+/**
+ * 导出小说为 gzip 压缩的 JSON 归档（仅文本，不含向量）。
+ *
+ * 响应为二进制，故 `responseType: 'blob'`；大本小说取正文 + 压缩可能较慢，关闭超时。
+ */
+export const exportNovel = (novelId: number) =>
+    http.get<unknown, Blob>(`/novels/${novelId}/export`, {
+        responseType: 'blob',
+        timeout: 0,
+    });
+
+/**
+ * 导入 gzip 归档：后端校验通过后**立即返回 `202`**，随后在后台重建内容并重新计算所有向量。
+ *
+ * 因此本请求不会因为重嵌入而长时间挂起（不会触发 nginx 超时）；
+ * 进度通过轮询 `listNovels()` 返回的 `importPhase` 字段感知。
+ */
+export const importNovel = (novelId: number, file: Blob) =>
+    http.post<unknown, ImportNovelAccepted>(`/novels/${novelId}/import`, file, {
+        headers: { 'Content-Type': 'application/gzip' },
     });

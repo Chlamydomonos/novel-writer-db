@@ -25,6 +25,16 @@ export async function buildApp(): Promise<FastifyInstance> {
         logger: true,
     });
 
+    // 归档导入上传的是 gzip 原始字节而非 JSON，为这些 Content-Type 注册 buffer 解析器。
+    // 路由层（`POST /api/novels/:novelId/import`）负责解压与结构校验。
+    app.addContentTypeParser(
+        ['application/gzip', 'application/x-gzip', 'application/octet-stream'],
+        { parseAs: 'buffer' },
+        (_request, body, done) => {
+            done(null, body);
+        },
+    );
+
     // 全局错误处理器：handler 抛出的异常在此统一映射。
     app.setErrorHandler((err, _request, reply) => {
         // Fastify 自身的 schema 校验错误 → 400

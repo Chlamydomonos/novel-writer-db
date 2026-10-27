@@ -17,7 +17,7 @@
 
 | 方法     | 路径                              | 对应 `Novel` 方法                   | 说明                         |
 | -------- | --------------------------------- | ----------------------------------- | ---------------------------- |
-| `GET`    | `/api/novels`                     | `listAll`                           | 列出全部小说                 |
+| `GET`    | `/api/novels`                     | `listAll`                           | 列出全部小说（含导入状态）   |
 | `POST`   | `/api/novels`                     | `create`                            | 创建小说                     |
 | `GET`    | `/api/novels/:novelId`            | `byID`                              | 获取小说基本信息             |
 | `PATCH`  | `/api/novels/:novelId`            | `rename` / `writeInfo` / `editInfo` | 修改小说元信息               |
@@ -32,6 +32,8 @@
 | `POST`   | `/api/novels/:novelId/search`     | `search`                            | 语义检索                     |
 | `DELETE` | `/api/novels/:novelId/documents`  | `deleteDocument`                    | 删除文档                     |
 | `DELETE` | `/api/novels/:novelId/categories` | `deleteCategory`                    | 删除目录                     |
+| `GET`    | `/api/novels/:novelId/export`     | `exportArchive`                     | 导出 gzip 归档（仅文本）     |
+| `POST`   | `/api/novels/:novelId/import`     | `importArchive`                     | 导入 gzip 归档并重算向量     |
 
 ## 错误响应
 
@@ -69,9 +71,11 @@ GET /api/novels
 ```json
 [
     { "id": 1, "name": "三体" },
-    { "id": 2, "name": "冰与火之歌" }
+    { "id": 2, "name": "冰与火之歌", "importPhase": "importing" }
 ]
 ```
+
+`importPhase` / `importError` 是后端根据内存中的归档导入状态附加的可选字段，详见 [归档导入 / 导出](#归档导入--导出)。
 
 ### 创建小说
 
@@ -278,6 +282,84 @@ DELETE /api/novels/:novelId/categories?path=/设定/废弃
 ```
 
 响应：`204 No Content`。**禁止删除根目录**。
+
+## 归档导入 / 导出
+
+导出文件是 **gzip 压缩的 JSON**，只包含文本（目录结构 + 文档正文），**不包含 ChromaDB 向量**；导入时由后端重新嵌入全部文档。
+
+### 导出小说
+
+```
+GET /api/novels/:novelId/export
+```
+
+响应：`200`，`Content-Type: application/gzip`，`Content-Disposition: attachment`（文件名形如 `三体.nwd.gz`）。
+
+解压后的 JSON 结构（`NovelArchive`，见 `@novel-writer/shared`）：
+
+```json
+{
+    "format": "novel-writer-db",
+    "version": 1,
+    "exportedAt": "2026-10-27T00:00:00.000Z",
+    "novel": { "name": "三体", "info": "硬科幻" },
+    "roots": [
+        {
+            "root": "设定",
+            "tree": [
+                { "name": "世界", "children": [{ "name": "人物卡.md", "content": "# 人物卡\n..." }] },
+                { "name": "序章.md", "content": "..." }
+            ]
+        },
+        { "root": "大纲", "tree": [] },
+        { "root": "正文", "tree": [] }
+    ]
+}
+```
+
+- 目录节点：只有 `name` 与可选的 `children`，没有 `content`。
+- 文档节点：`name` 以 `.md` 结尾，必须有 `content`，没有 `children`。
+- 三个根目录总是全部出现（空目录为 `[]`）。
+
+### 导入小说
+
+```
+POST /api/novels/:novelId/import
+Content-Type: application/gzip
+
+<gzip 压缩后的 NovelArchive JSON>
+```
+
+响应：`202 Accepted`，**连接随即结束**。
+
+```json
+{ "novelId": 1, "name": "三体", "importPhase": "importing" }
+```
+
+**覆盖语义**：目标小说的**名称与简介保持不变**，其余内容（三个根目录下的全部子目录与文档）先清空再按归档重建；删除旧 collection 后重建，然后**重新计算所有向量**。
+
+**两阶段执行（避免反代超时）**：
+
+1. **同步阶段**（请求内）：解压 → JSON 解析 → 结构校验。失败立即返回 `400`。
+2. **后台阶段**（响应后）：落库 + 重建 collection + 重新嵌入全部文档。完成后清除状态。
+
+因此本接口**不会**因为重嵌入耗时而长时间挂起（nginx `proxy_read_timeout` 不构成限制）。进度通过 `GET /api/novels` 轮询观测：
+
+| 列表项的 `importPhase` | 含义                                   |
+| ---------------------- | -------------------------------------- |
+| `importing`            | 后台正在重建内容与向量                 |
+| `failed`               | 上一次导入失败，`importError` 给出原因 |
+| （字段缺失）           | 正常；导入已成功，或从未导入           |
+
+`importPhase` **仅保存在后端进程内存**（不落库、不改表结构）：进程重启后丢失，正在进行的导入任务也随之丢失。
+
+导入进行中，除本接口外的所有 `/api/novels/:novelId/*` 请求返回 `409 ExistError`（此时目录/文档正在被清空重建，读写会看到半成品），同一小说的并发导入也被拒绝为 `409`。
+
+校验失败（非法 gzip、`format`/`version` 不匹配、节点名称含路径分隔符或重名、目录节点带 `content`、文档节点缺 `content` 等）返回 `400 InvalidPathError`（此时状态会被记为 `failed`，便于前端提示）。
+
+> 前端 `NovelList.vue` 在每行提供「导出 / 导入」按钮；导入前二次确认，上传成功后该行显示「导入中…」并禁用其它操作，前端每 2 秒轮询列表，完成/失败时提示。
+
+> 前端 `NovelList.vue` 在每行提供「导出 / 导入」按钮；导入前会二次确认提示将覆盖现有内容。
 
 ## 实作指引（已落地）
 

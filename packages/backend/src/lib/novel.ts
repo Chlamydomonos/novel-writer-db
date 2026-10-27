@@ -1,5 +1,15 @@
 import { Op, type Transaction } from '@sequelize/core';
-import { DELETED_LINK_TARGET, ROOT_CATEGORY_NAMES, type RootCategoryName } from '@novel-writer/shared';
+import {
+    DELETED_LINK_TARGET,
+    NOVEL_ARCHIVE_FORMAT,
+    NOVEL_ARCHIVE_VERSION,
+    ROOT_CATEGORY_NAMES,
+    type ArchiveNode,
+    type ImportNovelResult,
+    type NovelArchive,
+    type NovelArchiveRoot,
+    type RootCategoryName,
+} from '@novel-writer/shared';
 import { getChroma } from './db/chroma.js';
 import { embeddingFunction } from './db/embedding.js';
 import { Category } from './db/models/category.js';
@@ -13,6 +23,19 @@ import { collectLinkMatches, isDocumentPath, relativeHrefFrom, resolveLinkPath, 
 // 从 @novel-writer/shared 再导出，便于现有 `import { RootCategoryName } from '../lib/novel.js'` 调用方继续工作。
 export type { RootCategoryName } from '@novel-writer/shared';
 export { ROOT_CATEGORY_NAMES };
+
+/** 归档导入过程中收集的文档记录（事务提交后据此重建向量）。 */
+interface ImportedArchiveDocument {
+    documentId: number;
+    /** 所属根目录的 Category id（Chroma collection 名由它决定）。 */
+    rootId: number;
+    /** 文档绝对路径，仅用于重建链接时推导所在目录。 */
+    path: string;
+    text: string;
+}
+
+/** 重新嵌入时的批大小：单次 upsert 交给嵌入函数的文档数。 */
+const EMBED_BATCH_SIZE = 32;
 
 export class Novel {
     private constructor(
@@ -903,5 +926,258 @@ export class Novel {
         if (documentIds.length > 0) {
             await collection.delete({ ids: documentIds.map((i) => i.toString()) });
         }
+    }
+
+    // ===========================================================================
+    // 导出 / 导入（归档：仅文本，不含向量）
+    // ===========================================================================
+
+    // 导出当前小说的完整文本快照（压缩由 HTTP 层完成）。
+    // 正文只存放在 ChromaDB（按根目录 collection，id 为 documentId），故按根目录整表取回一次。
+    // 不导出向量：导入时会重新嵌入。
+    async exportArchive(): Promise<NovelArchive> {
+        const chroma = await getChroma();
+        const roots: NovelArchiveRoot[] = [];
+
+        for (const rootName of ROOT_CATEGORY_NAMES) {
+            const rootCategory = await Category.findOne({ where: { novelId: this.id, name: rootName } });
+            if (!rootCategory) {
+                continue;
+            }
+
+            const collection = await chroma.getCollection({
+                name: `category_${rootCategory.id}`,
+                embeddingFunction,
+            });
+            const result = await collection.get({ include: ['documents'] });
+            const textById = new Map<string, string>();
+            for (let i = 0; i < result.ids.length; i++) {
+                const id = result.ids[i];
+                const text = result.documents[i];
+                if (id !== undefined && typeof text === 'string') {
+                    textById.set(id, text);
+                }
+            }
+
+            roots.push({ root: rootName, tree: await this.exportCategoryTree(rootCategory.id, textById) });
+        }
+
+        return {
+            format: NOVEL_ARCHIVE_FORMAT,
+            version: NOVEL_ARCHIVE_VERSION,
+            exportedAt: new Date().toISOString(),
+            novel: { name: this._name, info: this._info },
+            roots,
+        };
+    }
+
+    private async exportCategoryTree(categoryId: number, textById: Map<string, string>): Promise<ArchiveNode[]> {
+        const categories = await Category.findAll({ where: { parentId: categoryId } });
+        const documents = await Document.findAll({ where: { categoryId } });
+
+        const nodes: ArchiveNode[] = [];
+        for (const category of categories) {
+            nodes.push({
+                name: category.name,
+                children: await this.exportCategoryTree(category.id, textById),
+            });
+        }
+        for (const document of documents) {
+            // 正常流程下写入即嵌入，正文必定存在；缺失时以空正文兜底，避免整本导出失败。
+            nodes.push({ name: document.name, content: textById.get(document.id.toString()) ?? '' });
+        }
+        return nodes;
+    }
+
+    // 校验归档树并归一化为「按三个根目录固定顺序」的树列表。
+    // 名称限制与系统路径规则一致：不能含路径分隔符与 `.`（目录）、文档必须以 `.md` 结尾；
+    // 同一目录下不允许重名（数据库无唯一约束，重名会产生难以区分的节点）。
+    private normalizeArchive(archive: NovelArchive): NovelArchiveRoot[] {
+        if (archive.format !== NOVEL_ARCHIVE_FORMAT) {
+            throw new InvalidPathError(`不支持的归档格式：${String(archive.format)}`);
+        }
+        if (archive.version !== NOVEL_ARCHIVE_VERSION) {
+            throw new InvalidPathError(`不支持的归档版本：${String(archive.version)}`);
+        }
+
+        const trees = new Map<RootCategoryName, ArchiveNode[]>();
+        for (const item of archive.roots) {
+            if (!ROOT_CATEGORY_NAMES.includes(item.root)) {
+                throw new InvalidPathError(`未知的根目录：${String(item.root)}`);
+            }
+            trees.set(item.root, item.tree);
+        }
+
+        const validate = (nodes: ArchiveNode[], parentPath: string) => {
+            const seen = new Set<string>();
+            for (const node of nodes) {
+                const name = node.name;
+                if (name.trim().length === 0 || name === '.' || name === '..') {
+                    throw new InvalidPathError(`归档中存在非法名称: \`${parentPath}/${name}\``);
+                }
+                if (name.includes('/') || name.includes('\\')) {
+                    throw new InvalidPathError(`节点名称不能包含路径分隔符: \`${name}\``);
+                }
+                if (seen.has(name)) {
+                    throw new InvalidPathError(`归档中 \`${parentPath}\` 下存在重名节点: \`${name}\``);
+                }
+                seen.add(name);
+
+                const path = `${parentPath}/${name}`;
+                if (name.endsWith('.md')) {
+                    if (node.children !== undefined && node.children.length > 0) {
+                        throw new InvalidPathError(`文档节点不能包含子节点: \`${path}\``);
+                    }
+                } else {
+                    if (name.includes('.')) {
+                        throw new InvalidPathError(`目录名称不能包含 \`.\`: \`${path}\``);
+                    }
+                    if (node.content !== undefined) {
+                        throw new InvalidPathError(`目录节点不能包含正文: \`${path}\``);
+                    }
+                    validate(node.children ?? [], path);
+                }
+            }
+        };
+
+        const result: NovelArchiveRoot[] = [];
+        for (const root of ROOT_CATEGORY_NAMES) {
+            const tree = trees.get(root) ?? [];
+            validate(tree, `/${root}`);
+            result.push({ root, tree });
+        }
+        return result;
+    }
+
+    // 以归档**覆盖**当前小说的全部内容（目录 + 文档），并重新计算所有向量。
+    //
+    // 语义：目标小说的名称 / 简介保持不变；三个根目录与全部子目录、文档先清空再按归档重建，
+    // 随后删除旧的 ChromaDB collection、按新的根目录 id 新建并批量重新嵌入。
+    // 链接表在事务内、全部文档落库后统一重建（保证指向后出现的文档也能识别）。
+    async importArchive(archive: NovelArchive): Promise<ImportNovelResult> {
+        const trees = this.normalizeArchive(archive);
+        const db = await getDB();
+
+        // 旧根目录（Chroma collection 名以其 id 为准），事务提交后用于清理。
+        const oldRoots = await Category.findAll({ where: { novelId: this.id } });
+
+        const { rootIds, docs, categoryCount } = await db.transaction(async (transaction) => {
+            // ---- 1) 清空现有内容：文档 → 链接 → 目录（显式删除，不依赖级联顺序） ----
+            const categoryIds: number[] = [];
+            let frontier = (await Category.findAll({ where: { novelId: this.id }, transaction })).map((c) => c.id);
+            while (frontier.length > 0) {
+                categoryIds.push(...frontier);
+                frontier = (await Category.findAll({ where: { parentId: { [Op.in]: frontier } }, transaction })).map(
+                    (c) => c.id,
+                );
+            }
+
+            const existingDocs = await Document.findAll({
+                where: { categoryId: { [Op.in]: categoryIds } },
+                transaction,
+            });
+            const existingDocIds = existingDocs.map((d) => d.id);
+            if (existingDocIds.length > 0) {
+                await DocumentLink.destroy({ where: { documentId: { [Op.in]: existingDocIds } }, transaction });
+                await Document.destroy({ where: { id: { [Op.in]: existingDocIds } }, transaction });
+            }
+            if (categoryIds.length > 0) {
+                await Category.destroy({ where: { id: { [Op.in]: categoryIds } }, transaction });
+            }
+
+            // ---- 2) 重建三个根目录（新 id → 事务提交后据此新建 Chroma collection） ----
+            const rootIds = new Map<RootCategoryName, number>();
+            for (const name of ROOT_CATEGORY_NAMES) {
+                const model = await Category.create({ name, novelId: this.id }, { transaction });
+                rootIds.set(name, model.id);
+            }
+
+            // ---- 3) 按归档逐棵树落库 ----
+            const docs: ImportedArchiveDocument[] = [];
+            let categoryCount = 0;
+            for (const { root, tree } of trees) {
+                const rootId = rootIds.get(root)!;
+                categoryCount += await this.createNodesFromArchive(tree, rootId, `/${root}`, rootId, transaction, docs);
+            }
+
+            // ---- 4) 全部文档落库后再解析链接 ----
+            for (const doc of docs) {
+                const dirPath = doc.path.slice(0, doc.path.lastIndexOf('/'));
+                await this.syncDocumentLinks(doc.documentId, dirPath, doc.text, transaction);
+            }
+
+            return { rootIds, docs, categoryCount };
+        });
+
+        // ---- 5) 重建 ChromaDB 并重新嵌入（不参与 Sequelize 事务） ----
+        const chroma = await getChroma();
+        for (const oldRoot of oldRoots) {
+            try {
+                await chroma.deleteCollection({ name: `category_${oldRoot.id}` });
+            } catch {
+                // 旧 collection 可能不存在，忽略以便导入继续。
+            }
+        }
+        for (const rootId of rootIds.values()) {
+            await chroma.createCollection({ name: `category_${rootId}`, embeddingFunction });
+        }
+
+        const byRoot = new Map<number, ImportedArchiveDocument[]>();
+        for (const doc of docs) {
+            const list = byRoot.get(doc.rootId);
+            if (list) {
+                list.push(doc);
+            } else {
+                byRoot.set(doc.rootId, [doc]);
+            }
+        }
+        for (const [rootId, list] of byRoot) {
+            const collection = await chroma.getCollection({ name: `category_${rootId}`, embeddingFunction });
+            for (let i = 0; i < list.length; i += EMBED_BATCH_SIZE) {
+                const chunk = list.slice(i, i + EMBED_BATCH_SIZE);
+                await collection.upsert({
+                    ids: chunk.map((d) => d.documentId.toString()),
+                    documents: chunk.map((d) => d.text),
+                });
+            }
+        }
+
+        return {
+            novelId: this.id,
+            name: this._name,
+            stats: { categories: categoryCount, documents: docs.length },
+        };
+    }
+
+    // 递归把归档节点写入 DB，并把文档记录收集到 `docs`（供事务提交后重建向量）。
+    // 返回新建的目录数（不含根目录）。
+    private async createNodesFromArchive(
+        nodes: ArchiveNode[],
+        parentCategoryId: number,
+        parentPath: string,
+        rootId: number,
+        transaction: Transaction,
+        docs: ImportedArchiveDocument[],
+    ): Promise<number> {
+        let categoryCount = 0;
+        for (const node of nodes) {
+            const path = `${parentPath}/${node.name}`;
+            if (node.name.endsWith('.md')) {
+                const model = await Document.create({ categoryId: parentCategoryId, name: node.name }, { transaction });
+                docs.push({ documentId: model.id, rootId, path, text: node.content ?? '' });
+            } else {
+                const model = await Category.create({ parentId: parentCategoryId, name: node.name }, { transaction });
+                categoryCount++;
+                categoryCount += await this.createNodesFromArchive(
+                    node.children ?? [],
+                    model.id,
+                    path,
+                    rootId,
+                    transaction,
+                    docs,
+                );
+            }
+        }
+        return categoryCount;
     }
 }

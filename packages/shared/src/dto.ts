@@ -63,10 +63,26 @@ export type KnownErrorType =
 // 小说（Novel）相关 DTO
 // ===========================================================================
 
-/** 小说列表项，对应 `Novel.listAll` / `GET /api/novels`。 */
+/**
+ * 小说归档导入的运行时状态。
+ *
+ * 仅保存在后端进程内存中（不落库）：`importing` 表示后台正在重建内容与向量，
+ * `failed` 表示上一次导失败且尚未重试，正常小说不带该字段。
+ */
+export type NovelImportPhase = 'importing' | 'failed';
+
+/**
+ * 小说列表项，对应 `Novel.listAll` / `GET /api/novels`。
+ *
+ * `importPhase` / `importError` 由后端根据内存中的导入状态附加，与数据库无关。
+ */
 export interface NovelSummary {
     id: number;
     name: string;
+    /** 后台导入状态；仅当该小说正在导入或上一次导入失败时出现。 */
+    importPhase?: NovelImportPhase;
+    /** 导入失败原因（仅 `importPhase === 'failed'` 时出现）。 */
+    importError?: string;
 }
 
 /** 小说详情，对应 `Novel.byID` / `GET /api/novels/:id` / `POST /api/novels` 的响应。 */
@@ -214,3 +230,85 @@ export interface SearchResultItem {
 
 /** 语义检索响应。 */
 export type SearchResponse = SearchResultItem[];
+
+// ===========================================================================
+// 小说归档（导出 / 导入）
+// ===========================================================================
+
+/**
+ * 归档文件格式标识。导出文件是 **gzip 压缩的 JSON**，解压后 `format` 字段必须等于该值。
+ */
+export const NOVEL_ARCHIVE_FORMAT = 'novel-writer-db';
+
+/** 归档文件版本号；后续结构变更时递增，导入端据此拒绝不认识的版本。 */
+export const NOVEL_ARCHIVE_VERSION = 1;
+
+/**
+ * 归档中的树节点（递归），与 `ImportNode` 结构一致：
+ *
+ * - 目录节点：只有 `name` 与（可选的）`children`，没有 `content`；
+ * - 文档节点：`name` 以 `.md` 结尾，带 `content`（正文），没有 `children`。
+ */
+export interface ArchiveNode {
+    name: string;
+    content?: string | undefined;
+    children?: ArchiveNode[] | undefined;
+}
+
+/** 单个根目录的归档内容。 */
+export interface NovelArchiveRoot {
+    /** 根目录名，`设定` / `大纲` / `正文` 之一。 */
+    root: RootCategoryName;
+    /** 该根目录下的整棵树。 */
+    tree: ArchiveNode[];
+}
+
+/**
+ * 导出文件（gzip 压缩前的 JSON）。
+ *
+ * **仅包含文本**：目录结构与文档正文；不包含 ChromaDB 向量。导入时后端会重新嵌入全部文档。
+ */
+export interface NovelArchive {
+    format: typeof NOVEL_ARCHIVE_FORMAT;
+    version: typeof NOVEL_ARCHIVE_VERSION;
+    /** 导出时间（ISO 8601），仅作溯源信息。 */
+    exportedAt: string;
+    /** 导出时的元信息，仅作溯源信息（导入到已存在小说时**不会**覆盖目标小说的名称与简介）。 */
+    novel: {
+        name: string;
+        info: string;
+    };
+    /** 三个根目录的树（即使某个根目录为空也会出现）。 */
+    roots: NovelArchiveRoot[];
+}
+
+/**
+ * `POST /api/novels/:id/import` 的响应体（`202 Accepted`）。
+ *
+ * 导入在后台执行（重建目录/文档并重新嵌入全部向量），故立即返回，避免长连接被反代超时切断。
+ * 进度通过 `GET /api/novels` 上的 `importPhase` 轮询观测；接口完成后该字段消失，失败则为 `failed`。
+ */
+export interface ImportNovelAccepted {
+    novelId: number;
+    /** 目标小说名称（未因导入而改变）。 */
+    name: string;
+    /** 固定为 `importing`，指示后台任务已开始。 */
+    importPhase: 'importing';
+}
+
+/**
+ * 归档导入完成后台任务的统计结果（**不直接返回给客户端**）。
+ *
+ * 作为 `Novel.importArchive` 的返回值记录到日志，便于排查导入规模。
+ */
+export interface ImportNovelResult {
+    novelId: number;
+    /** 目标小说名称（未因导入而改变）。 */
+    name: string;
+    stats: {
+        /** 新建的目录数（不含三个根目录）。 */
+        categories: number;
+        /** 写入并重新向量化的文档数。 */
+        documents: number;
+    };
+}

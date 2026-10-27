@@ -21,10 +21,23 @@ http.interceptors.request.use((config: InternalAxiosRequestConfig) => config);
 
 http.interceptors.response.use(
     (response) => (response.status === 204 ? undefined : response.data),
-    (error: AxiosError<ApiErrorBody>) => {
+    async (error: AxiosError) => {
         const status = error.response?.status ?? 0;
-        const type = (error.response?.data?.error?.type ?? 'Unknown') as KnownErrorType;
-        const message = error.response?.data?.error?.message ?? error.message;
+
+        // 二进制响应（`responseType: 'blob'`，如导出归档）出错时，错误体同样是 Blob，
+        // 需先读成文本再按统一错误结构解析。
+        let payload: unknown = error.response?.data;
+        if (payload instanceof Blob) {
+            try {
+                payload = JSON.parse(await payload.text());
+            } catch {
+                payload = undefined;
+            }
+        }
+
+        const detail = (payload as ApiErrorBody | undefined)?.error;
+        const type = (detail?.type ?? 'Unknown') as KnownErrorType;
+        const message = detail?.message ?? error.message;
         return Promise.reject(new ApiError(status, type, message));
     },
 );
